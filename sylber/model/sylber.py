@@ -60,84 +60,85 @@ class Segmenter():
         self.norm_threshold = norm_threshold
         self.merge_threshold=merge_threshold
 
-    def __call__(self, wav_file=None, wav=None, in_second=True):
+    def _to_mono_tensor(self, x: torch.Tensor | np.ndarray | list) -> torch.Tensor:
+        """Return float32 tensor shaped [1, T], mono."""
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x)
+        elif isinstance(x, list):
+            x = torch.tensor(x, dtype=torch.float32)
+        x = x.float()
+        if x.ndim == 1:
+            x = x.unsqueeze(0)
+        elif x.ndim == 2 and x.size(0) > 1:
+            x = x.mean(dim=0, keepdim=True)
+        return x
+
+    def __call__(self, wav_file=None, wav=None, in_second=True, wav_sr: int = 16000):
         """
-        Process single wav file or a list of wav files through the model
-        
-        Args:
-            wav_file: Path to a single wav file or a list of wav file paths
-            wavs: 
-            in_second: if true, segment boundaries will be in seconds. Otherwise frame indices (at 50Hz).
-            
-        Returns:
-            For single file: Dictionary with segments and segment_features
-            For multiple files: List of dictionaries, each with segments and segment_features
+        Process single wav file/array or list of them.
+        Accepts: file path(s) OR tensors/NumPy arrays/lists of floats.
         """
-        # Load and preprocess all wav files
         batch_wavs = []
-        
+
         if wav_file is not None:
             is_batch = isinstance(wav_file, list)
             wav_files = wav_file if is_batch else [wav_file]
             for file in wav_files:
-                wav, sr = torchaudio.load(file)
+                y, sr = torchaudio.load(file)          # [C, T]
+                if y.size(0) > 1:
+                    y = y.mean(dim=0, keepdim=True)    # mono
                 if sr != 16000:
-                    wav = torchaudio.transforms.Resample(sr, 16000)(wav)
-                wav = (wav - wav.mean()) / wav.std()
-                batch_wavs.append(wav)
+                    y = torchaudio.transforms.Resample(sr, 16000)(y)
+                y = (y - y.mean()) / (y.std() + 1e-9)  # z-norm
+                batch_wavs.append(y)
         else:
             assert wav is not None
-            is_batch = isinstance(wav, list)
-            batch_wavs = wav if is_batch else [wav]
-            batch_wavs = [wav[None,...] for wav in batch_wavs if len(wav.shape)==1]
-            batch_wavs = [torch.from_numpy(wav).float() for wav in batch_wavs if isinstance(wav, np.ndarray)]
-        
-        orig_lengths = []
-        max_length = 0
-        for wav in batch_wavs:
-            orig_lengths.append(wav.shape[1])
-            max_length = max(max_length, wav.shape[1])
-        
-        # Pad wavs to the same size
-        padded_wavs = []
-        attention_masks = []
-        
-        for wav, _ in zip(batch_wavs, orig_lengths):
-            padding = max_length - wav.shape[1]
-            if padding > 0:
-                padded_wav = torch.nn.functional.pad(wav, (0, padding))
-                # Create attention mask (1 for real data, 0 for padding)
-                attention_mask = torch.ones(wav.shape[1], dtype=torch.long)
-                attention_mask = torch.nn.functional.pad(attention_mask, (0, padding), value=0)
+            is_batch = isinstance(wav, (list, tuple)) and not isinstance(wav, (np.ndarray, torch.Tensor))
+            items = wav if is_batch else [wav]
+            for x in items:
+                y = self._to_mono_tensor(x)            # [1, T]
+                if wav_sr != 16000:
+                    y = torchaudio.functional.resample(y, wav_sr, 16000)
+                y = (y - y.mean()) / (y.std() + 1e-9)
+                batch_wavs.append(y)
+
+        orig_lengths, max_length = [], 0
+        for y in batch_wavs:
+            orig_lengths.append(y.shape[1])
+            max_length = max(max_length, y.shape[1])
+
+        padded_wavs, attention_masks = [], []
+        for y, _ in zip(batch_wavs, orig_lengths):
+            pad = max_length - y.shape[1]
+            if pad > 0:
+                yy = F.pad(y, (0, pad))
+                am = torch.ones(y.shape[1], dtype=torch.long)
+                am = F.pad(am, (0, pad), value=0)
             else:
-                padded_wav = wav
-                attention_mask = torch.ones(wav.shape[1], dtype=torch.long)
-            
-            padded_wavs.append(padded_wav)
-            attention_masks.append(attention_mask)
-        
-        batch_tensor = torch.cat(padded_wavs, dim=0).to(self.device)
-        attention_mask = torch.stack(attention_masks).to(self.device)
-                
+                yy = y
+                am = torch.ones(y.shape[1], dtype=torch.long)
+            padded_wavs.append(yy)
+            attention_masks.append(am)
+
+        batch_tensor = torch.cat(padded_wavs, dim=0).to(self.device)   # [B, T], assumes [1, T] per item
+        attention_mask = torch.stack(attention_masks).to(self.device)  # [B, T]
+
         with torch.no_grad():
             self.speech_model.eval()
             hidden_states = self.speech_model(batch_tensor, attention_mask=attention_mask).last_hidden_state
-                    
-        # Process results serially
+
         hidden_states = hidden_states.cpu().numpy()
-        all_segments = [get_segment(states, self.norm_threshold, self.merge_threshold) for states in hidden_states]
-        
+        all_segments = [get_segment(h, self.norm_threshold, self.merge_threshold) for h in hidden_states]
+
         outputs = []
         for i, segments in enumerate(all_segments):
-            states = hidden_states[i]
-            result = {
-                'segments': segments * 1.0 / 50 if in_second else segments,
-                'segment_features': np.stack([states[s:e].mean(0) for s, e in segments]) if len(segments) > 0 else np.array([]),
-                'hidden_states': states
-            }
-            outputs.append(result)
-        
-        return outputs if is_batch else outputs[0]
+            h = hidden_states[i]
+            outputs.append({
+                'segments': segments * (1.0 / 50) if in_second else segments,
+                'segment_features': np.stack([h[s:e].mean(0) for s, e in segments]) if len(segments) else np.array([]),
+                'hidden_states': h,
+            })
+        return outputs if (wav_file is not None and isinstance(wav_file, list)) or (wav is not None and isinstance(wav, (list, tuple))) else outputs[0]
         
 class Sylber(nn.Module):
 
