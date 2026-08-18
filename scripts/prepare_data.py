@@ -118,6 +118,14 @@ def _fleurs_tar(repo, out_name, kind, args):
                     if per_lang and sec >= per_lang * 3600:
                         break
             print(f"  {lang}: {n} files, {sec/3600:.2f} h", flush=True)
+            if not getattr(args, "keep_archives", False):
+                # free the cached tarball (blob + symlink) after extraction
+                real = os.path.realpath(tar_path)
+                for p in (tar_path, real):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
     print(f"DONE {manifest}")
 
 
@@ -284,6 +292,8 @@ def main():
                             "others: per language)")
         p.add_argument("--split", default="train",
                        help="fleurs/fleurs_r only: train|dev|test")
+        p.add_argument("--keep-archives", action="store_true",
+                       help="fleurs/fleurs_r only: keep cached tarballs")
     p = sub.add_parser("noise"); p.add_argument("--run", action="store_true")
     p = sub.add_parser("rir"); p.add_argument("--gtu", action="store_true")
     p = sub.add_parser("speech_clips"); p.add_argument("--num-clips", type=int, default=20000)
