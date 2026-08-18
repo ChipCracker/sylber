@@ -1,5 +1,11 @@
 # SYLBER: Syllabic Embedding Representation of Speech from Raw Audio
 
+> **Sylber 2.0**: This fork contains a full reimplementation of
+> ["Sylber 2.0: A Universal Syllable Embedding" (arXiv:2601.22306)](https://arxiv.org/abs/2601.22306)
+> in [`sylber2/`](sylber2/) — see [README_SYLBER2.md](README_SYLBER2.md) and
+> [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
+
+
 [Paper](https://arxiv.org/abs/2410.07168) | [Audio Samples](https://berkeley-speech-group.github.io/sylber)
 
 Sylber is the first of its kind that yields extremely short tokens from raw audio (on average, 4.27 tokens/sec) through dynamic tokenization at the syllable granularity.
