@@ -44,20 +44,41 @@ def _manifest_path(kind, name):
 
 def _write_stream(iterator, out_dir, manifest, max_hours=None, min_seconds=1.0,
                   audio_key="audio"):
-    """Consume a HF streaming dataset, write flac files + manifest lines."""
+    """Consume a HF streaming dataset, write audio files + manifest lines.
+
+    Works with decoded audio ({"array", "sampling_rate"}) and with raw bytes
+    from Audio(decode=False) ({"bytes", "path"}) — the latter keeps the
+    original format and avoids the torchcodec dependency of datasets>=5."""
     out_dir.mkdir(parents=True, exist_ok=True)
     total_sec, n = 0.0, 0
     with open(manifest, "w") as mf:
         for i, ex in enumerate(iterator):
             audio = ex[audio_key]
-            arr, sr = np.asarray(audio["array"]), audio["sampling_rate"]
-            dur = len(arr) / sr
-            if dur < min_seconds:
-                continue
             sub = out_dir / f"{n // 10000:04d}"
             sub.mkdir(exist_ok=True)
-            path = sub / f"{n:08d}.flac"
-            sf.write(path, arr.astype(np.float32), sr)
+            dur = ex.get("duration")
+            if isinstance(audio, dict) and audio.get("bytes") is not None:
+                ext = Path(audio.get("path") or "x.wav").suffix or ".wav"
+                path = sub / f"{n:08d}{ext}"
+                with open(path, "wb") as fout:
+                    fout.write(audio["bytes"])
+                if dur is None:
+                    try:
+                        dur = sf.info(path).duration
+                    except Exception:
+                        path.unlink(missing_ok=True)
+                        continue
+            else:
+                arr, sr = np.asarray(audio["array"]), audio["sampling_rate"]
+                dur = len(arr) / sr
+                if dur < min_seconds:
+                    continue
+                path = sub / f"{n:08d}.flac"
+                sf.write(path, arr.astype(np.float32), sr)
+            dur = float(dur)
+            if dur < min_seconds:
+                path.unlink(missing_ok=True)
+                continue
             mf.write(f"{path.resolve()}\t{dur:.2f}\n")
             total_sec += dur
             n += 1
@@ -148,18 +169,22 @@ def cmd_mls(args):
 
 
 def cmd_emilia(args):
-    from datasets import load_dataset
+    from datasets import load_dataset, Audio
     langs = args.languages or EMILIA_LANGS
     for lang in langs:
         print(f"[emilia] {lang} (gated: requires accepted terms + HF_TOKEN)")
         ds = load_dataset("amphion/Emilia-Dataset", data_dir=f"Emilia/{lang}",
                           split="train", streaming=True)
+        akey = next((k for k in ("mp3", "wav", "flac", "audio")
+                     if k in (ds.column_names or ["mp3"])), "mp3")
+        ds = ds.cast_column(akey, Audio(decode=False))
         def gen():
             for ex in ds:
-                key = next((k for k in ("mp3", "wav", "audio") if k in ex), None)
-                if key is None:
+                if akey not in ex:
                     continue
-                yield {"audio": ex[key]}
+                meta = ex.get("json") or {}
+                yield {"audio": ex[akey],
+                       "duration": meta.get("duration") if isinstance(meta, dict) else None}
         _write_stream(gen(), DATA_ROOT / "audio" / "emilia" / lang,
                       _manifest_path("content", f"emilia_{lang.lower()}"),
                       max_hours=args.max_hours)
@@ -170,15 +195,17 @@ def cmd_fleurs_r(args):
 
 
 def cmd_expresso(args):
-    from datasets import load_dataset
+    from datasets import load_dataset, Audio
     ds = load_dataset("ylacombe/expresso", split="train", streaming=True)
+    ds = ds.cast_column("audio", Audio(decode=False))
     _write_stream(ds, DATA_ROOT / "audio" / "expresso",
                   _manifest_path("resynth", "expresso"), max_hours=args.max_hours)
 
 
 def cmd_globe(args):
-    from datasets import load_dataset
+    from datasets import load_dataset, Audio
     ds = load_dataset("MushanW/GLOBE_V2", split="train", streaming=True)
+    ds = ds.cast_column("audio", Audio(decode=False))
     _write_stream(ds, DATA_ROOT / "audio" / "globe",
                   _manifest_path("resynth", "globe"), max_hours=args.max_hours)
 
@@ -204,10 +231,10 @@ def cmd_noise(args):
     print(f"Official DNS script saved to {script}.")
     print("It downloads noise_fullband archives; run (large download!):")
     print(f"  cd {out} && bash {script.name} && "
-          "find . -name '*.tar.bz2' -exec tar xjf {} \;")
+          r"find . -name '*.tar.bz2' -exec tar xjf {} \;")
     if args.run:
         subprocess.run(["bash", str(script.name)], cwd=out, check=True)
-        subprocess.run("find . -name '*.tar.bz2' -exec tar xjf {} \;",
+        subprocess.run(r"find . -name '*.tar.bz2' -exec tar xjf {} \;",
                        shell=True, cwd=out, check=True)
 
 
