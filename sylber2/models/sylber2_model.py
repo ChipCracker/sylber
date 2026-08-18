@@ -142,7 +142,7 @@ class Sylber2(nn.Module):
         from the teacher's boundary detector via peak detection (stage 4)."""
         if self.stage == 4:
             self.teacher_boundary.eval()
-            probs = torch.sigmoid(self.teacher_boundary(trg_l9)).cpu().numpy()
+            probs = torch.sigmoid(self.teacher_boundary(trg_l9)).float().cpu().numpy()
             L = trg_l9.shape[1]
             return [boundaries_to_segments(detect_boundaries(p, **self.peak_kwargs), L)
                     for p in probs]
@@ -161,7 +161,7 @@ class Sylber2(nn.Module):
         frames, _ = self.student.student_frames(input_values)
         results = []
         if use_boundary_detector and self.student.boundary_detector is not None:
-            probs = torch.sigmoid(self.student.boundary_logits(frames)).cpu().numpy()
+            probs = torch.sigmoid(self.student.boundary_logits(frames)).float().cpu().numpy()
             L = frames.shape[1]
             kw = dict(self.peak_kwargs)
             kw['prominence'] = inference_prominence

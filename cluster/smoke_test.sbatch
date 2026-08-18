@@ -17,8 +17,7 @@ mkdir -p "$OUT" && cd "$OUT"
 echo "=== GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader) ==="
 python "$REPO/tests/test_all.py"
 
-SMOKE="max_steps=30 checkpoint_every_steps=30 val_check_interval=25 \
-       data.batch_size=8 data.num_workers=8 data.dummy_len=2000 devices=1"
+SMOKE="max_steps=30 checkpoint_every_steps=30 val_check_interval=25 data.batch_size=8 data.num_workers=8 data.dummy_len=2000 devices=1"
 
 echo "=== stage 1 ==="
 python -m sylber2.train_content --config-name content_stage1 $SMOKE \
