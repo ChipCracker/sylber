@@ -68,40 +68,61 @@ def _write_stream(iterator, out_dir, manifest, max_hours=None, min_seconds=1.0,
     print(f"DONE {manifest.name}: {n} files, {total_sec/3600:.2f} h")
 
 
-def cmd_fleurs(args):
-    from datasets import load_dataset, get_dataset_config_names
-    langs = args.languages or [c for c in get_dataset_config_names("google/fleurs")
-                               if c != "all"]
-    out_dir = DATA_ROOT / "audio" / "fleurs"
-    manifest = _manifest_path("content", "fleurs")
+def _fleurs_langs(repo):
+    from huggingface_hub import HfApi
+    api = HfApi()
+    return sorted(e.path.split("/")[-1]
+                  for e in api.list_repo_tree(repo, "data", repo_type="dataset")
+                  if e.path.count("/") == 1)
+
+
+def _fleurs_tar(repo, out_name, kind, args):
+    """Download FLEURS(-R) language tarballs directly (the datasets-lib loading
+    script is no longer supported) and build one combined manifest."""
+    import tarfile
+    from huggingface_hub import hf_hub_download
+    langs = args.languages or _fleurs_langs(repo)
+    split = getattr(args, "split", "train")
+    out_dir = DATA_ROOT / "audio" / out_name
+    manifest = _manifest_path(kind, out_name)
     per_lang = (args.max_hours / len(langs)) if args.max_hours else None
-    total = 0
     with open(manifest, "w") as mf:
         for lang in langs:
-            print(f"[fleurs] {lang}")
+            print(f"[{out_name}] {lang} ({split})", flush=True)
             try:
-                ds = load_dataset("google/fleurs", lang, split="train", streaming=True,
-                                  trust_remote_code=True)
+                tar_path = hf_hub_download(repo, f"data/{lang}/audio/{split}.tar.gz",
+                                           repo_type="dataset")
             except Exception as e:
                 print(f"  skip {lang}: {e}")
                 continue
-            sec, n = 0.0, 0
             ld = out_dir / lang
             ld.mkdir(parents=True, exist_ok=True)
-            for ex in ds:
-                arr, sr = np.asarray(ex["audio"]["array"]), ex["audio"]["sampling_rate"]
-                dur = len(arr) / sr
-                if dur < 1.0:
-                    continue
-                path = ld / f"{n:06d}.flac"
-                sf.write(path, arr.astype(np.float32), sr)
-                mf.write(f"{path.resolve()}\t{dur:.2f}\n")
-                sec += dur
-                n += 1
-                if per_lang and sec >= per_lang * 3600:
-                    break
-            total += sec
-            print(f"  {lang}: {n} files, {sec/3600:.2f} h (total {total/3600:.1f} h)")
+            sec, n = 0.0, 0
+            with tarfile.open(tar_path, "r:gz") as tf:
+                for m in tf:
+                    if not m.isfile() or not m.name.endswith(".wav"):
+                        continue
+                    dst = ld / Path(m.name).name
+                    if not dst.exists():
+                        with tf.extractfile(m) as f, open(dst, "wb") as o:
+                            o.write(f.read())
+                    try:
+                        dur = sf.info(dst).duration
+                    except Exception:
+                        dst.unlink(missing_ok=True)
+                        continue
+                    if dur < 1.0:
+                        continue
+                    mf.write(f"{dst.resolve()}\t{dur:.2f}\n")
+                    sec += dur; n += 1
+                    if per_lang and sec >= per_lang * 3600:
+                        break
+            print(f"  {lang}: {n} files, {sec/3600:.2f} h", flush=True)
+    print(f"DONE {manifest}")
+
+
+def cmd_fleurs(args):
+    _fleurs_tar("google/fleurs", "fleurs", "content", args)
 
 
 def cmd_mls(args):
@@ -137,36 +158,7 @@ def cmd_emilia(args):
 
 
 def cmd_fleurs_r(args):
-    from datasets import load_dataset, get_dataset_config_names
-    langs = args.languages or [c for c in get_dataset_config_names("google/fleurs-r")
-                               if c != "all"]
-    out_dir = DATA_ROOT / "audio" / "fleurs_r"
-    manifest = _manifest_path("resynth", "fleurs_r")
-    per_lang = (args.max_hours / len(langs)) if args.max_hours else None
-    with open(manifest, "w") as mf:
-        for lang in langs:
-            print(f"[fleurs-r] {lang}")
-            try:
-                ds = load_dataset("google/fleurs-r", lang, split="train",
-                                  streaming=True, trust_remote_code=True)
-            except Exception as e:
-                print(f"  skip {lang}: {e}")
-                continue
-            sec, n = 0.0, 0
-            ld = out_dir / lang
-            ld.mkdir(parents=True, exist_ok=True)
-            for ex in ds:
-                arr, sr = np.asarray(ex["audio"]["array"]), ex["audio"]["sampling_rate"]
-                dur = len(arr) / sr
-                if dur < 1.0:
-                    continue
-                path = ld / f"{n:06d}.flac"
-                sf.write(path, arr.astype(np.float32), sr)
-                mf.write(f"{path.resolve()}\t{dur:.2f}\n")
-                sec += dur; n += 1
-                if per_lang and sec >= per_lang * 3600:
-                    break
-            print(f"  {lang}: {n} files, {sec/3600:.2f} h")
+    _fleurs_tar("google/fleurs-r", "fleurs_r", "resynth", args)
 
 
 def cmd_expresso(args):
@@ -290,6 +282,8 @@ def main():
         p.add_argument("--max-hours", type=float, default=None,
                        help="cap total (fleurs/fleurs_r: total across languages; "
                             "others: per language)")
+        p.add_argument("--split", default="train",
+                       help="fleurs/fleurs_r only: train|dev|test")
     p = sub.add_parser("noise"); p.add_argument("--run", action="store_true")
     p = sub.add_parser("rir"); p.add_argument("--gtu", action="store_true")
     p = sub.add_parser("speech_clips"); p.add_argument("--num-clips", type=int, default=20000)
