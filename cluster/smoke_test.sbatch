@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sylber2-smoke
 #SBATCH --partition=p4,p2,p1
-#SBATCH --qos=basic
+#SBATCH --qos=gpubasic
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
