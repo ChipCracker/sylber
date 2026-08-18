@@ -5,6 +5,7 @@ returns syllable segments plus embeddings; with a synthesis checkpoint it can
 also resynthesize 24 kHz audio from the syllabic embeddings.
 """
 import numpy as np
+import soundfile as sf
 import torch
 import torchaudio
 
@@ -22,7 +23,8 @@ def _strip_prefix(sd, prefix):
 class Segmenter2:
 
     def __init__(self, content_ckpt, synthesis_ckpt=None, device="cuda",
-                 model_configs=None, inference_prominence=0.1):
+                 model_configs=None, acoustic_configs=None, vocoder_configs=None,
+                 inference_prominence=0.1):
         if "cuda" in device and not torch.cuda.is_available():
             device = "cpu"
         self.device = device
@@ -36,9 +38,10 @@ class Segmenter2:
 
         self.synthesis = None
         if synthesis_ckpt is not None:
+            ac = dict(acoustic_configs or {}); ac["load_pretrained"] = False
             syn = SynthesisModel(content_encoder=self.model,
-                                 acoustic_encoder=AcousticEncoder(load_pretrained=False),
-                                 vocoder=SylberVocoder())
+                                 acoustic_encoder=AcousticEncoder(**ac),
+                                 vocoder=SylberVocoder(**(vocoder_configs or {})))
             state = torch.load(synthesis_ckpt, map_location="cpu", weights_only=False)
             sd = state.get("state_dict", state)
             sd = {k[len("model."):]: v for k, v in sd.items() if k.startswith("model.")}
@@ -47,8 +50,8 @@ class Segmenter2:
 
     def _load(self, wav_file=None, wav=None, sr=None, target_sr=16000):
         if wav_file is not None:
-            y, file_sr = torchaudio.load(wav_file)
-            y = y.mean(0)
+            arr, file_sr = sf.read(wav_file, dtype="float32", always_2d=True)
+            y = torch.from_numpy(arr.mean(-1))
             sr = file_sr
         else:
             y = torch.as_tensor(wav, dtype=torch.float32)

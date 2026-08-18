@@ -38,7 +38,7 @@ def main(cfg):
     ]
     trainer = pl.Trainer(
         devices=cfg.get("devices", 1),
-        accelerator="gpu",
+        accelerator=cfg.get("accelerator", "gpu"),
         strategy=cfg.get("strategy", "auto"),
         precision=cfg.get("precision", "32-true"),
         max_steps=cfg.max_steps,

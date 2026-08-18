@@ -32,3 +32,8 @@ model_ckpt: ???
 resume_ckpt: null
 devices: 1
 precision: bf16-mixed
+accelerator: gpu
+strategy: auto
+val_check_interval: 5000
+limit_val_batches: 10
+gradient_clip_val: 0.5
