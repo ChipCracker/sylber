@@ -1,8 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=sylber2-dl
 #SBATCH --partition=p0
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --qos=gpubasic
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16G
 #SBATCH --time=3-00:00:00
 #SBATCH --output=/nfs1/scratch/staff/witzlch/sylber2/logs/slurm-dl-%j.out
 # Generic CPU-only data-download job.
