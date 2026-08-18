@@ -8,7 +8,8 @@
 #SBATCH --time=14-00:00:00
 #SBATCH --output=%x-%j.out
 set -e
-source "$(dirname "$0")/common.sh"
+# locate common.sh: sbatch copies the script to a spool dir, so $0 is useless there
+source "${SLURM_SUBMIT_DIR:-.}/cluster/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 OUT="$SYLBER2_ROOT/outputs/cycle1"
 mkdir -p "$OUT" && cd "$OUT"
 python -m sylber2.train_vocoder --config-name vocoder_cycle1 \

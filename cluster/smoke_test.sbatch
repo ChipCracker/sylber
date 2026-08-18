@@ -10,7 +10,8 @@
 # End-to-end smoke test: unit tests on GPU + a few real training steps of
 # every stage/cycle through the actual Hydra entry points + inference.
 set -e
-source "$(dirname "$0")/common.sh"
+# locate common.sh: sbatch copies the script to a spool dir, so $0 is useless there
+source "${SLURM_SUBMIT_DIR:-.}/cluster/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 OUT="$SYLBER2_ROOT/outputs/smoke_$SLURM_JOB_ID"
 mkdir -p "$OUT" && cd "$OUT"
 
