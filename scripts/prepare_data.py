@@ -43,16 +43,32 @@ def _manifest_path(kind, name):
 
 
 def _write_stream(iterator, out_dir, manifest, max_hours=None, min_seconds=1.0,
-                  audio_key="audio"):
+                  audio_key="audio", resume=False):
     """Consume a HF streaming dataset, write audio files + manifest lines.
 
     Works with decoded audio ({"array", "sampling_rate"}) and with raw bytes
     from Audio(decode=False) ({"bytes", "path"}) — the latter keeps the
-    original format and avoids the torchcodec dependency of datasets>=5."""
+    original format and avoids the torchcodec dependency of datasets>=5.
+
+    With resume=True an existing manifest is continued: its entries are kept
+    and the first len(entries) stream items are skipped (streaming order is
+    deterministic)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     total_sec, n = 0.0, 0
-    with open(manifest, "w") as mf:
+    mode = "w"
+    if resume and Path(manifest).exists():
+        with open(manifest) as f_:
+            for line in f_:
+                if line.strip():
+                    n += 1
+                    total_sec += float(line.rstrip("\n").split("\t")[1])
+        mode = "a"
+        print(f"  resume: {n} files, {total_sec/3600:.2f} h already done", flush=True)
+    skip_n = n
+    with open(manifest, mode) as mf:
         for i, ex in enumerate(iterator):
+            if i < skip_n:
+                continue
             audio = ex[audio_key]
             sub = out_dir / f"{n // 10000:04d}"
             sub.mkdir(exist_ok=True)
@@ -107,12 +123,28 @@ def _fleurs_tar(repo, out_name, kind, args):
     out_dir = DATA_ROOT / "audio" / out_name
     manifest = _manifest_path(kind, out_name)
     per_lang = (args.max_hours / len(langs)) if args.max_hours else None
-    with open(manifest, "w") as mf:
+    done_file = manifest.with_suffix(".langs.done")
+    done_langs, mode = set(), "w"
+    if getattr(args, "resume", False) and done_file.exists() and manifest.exists():
+        done_langs = set(done_file.read_text().split())
+        # drop manifest lines of unfinished languages (they will be redone)
+        keep = [l for l in open(manifest)
+                if Path(l.split("\t")[0]).parent.name in done_langs]
+        with open(manifest, "w") as f_:
+            f_.writelines(keep)
+        mode = "a"
+        print(f"resume: {len(done_langs)} languages already done", flush=True)
+    elif not getattr(args, "resume", False):
+        done_file.unlink(missing_ok=True)
+    with open(manifest, mode) as mf:
         for lang in langs:
+            if lang in done_langs:
+                continue
             print(f"[{out_name}] {lang} ({split})", flush=True)
             try:
-                tar_path = hf_hub_download(repo, f"data/{lang}/audio/{split}.tar.gz",
-                                           repo_type="dataset")
+                tar_path = _hf_retry(hf_hub_download, repo,
+                                     f"data/{lang}/audio/{split}.tar.gz",
+                                     repo_type="dataset")
             except Exception as e:
                 print(f"  skip {lang}: {e}")
                 continue
@@ -147,6 +179,9 @@ def _fleurs_tar(repo, out_name, kind, args):
                         os.remove(p)
                     except OSError:
                         pass
+            mf.flush()
+            with open(done_file, "a") as f_:
+                f_.write(lang + "\n")
     print(f"DONE {manifest}")
 
 
@@ -199,9 +234,27 @@ def cmd_emilia(args):
             if e.path.endswith(".tar"))
         out_dir = DATA_ROOT / "audio" / "emilia" / lang
         manifest = _manifest_path("content", f"emilia_{lang.lower()}")
+        done_file = manifest.with_suffix(".tars.done")
+        done_tars, mode = set(), "w"
         sec, n = 0.0, 0
-        with open(manifest, "w") as mf:
+        if getattr(args, "resume", False) and done_file.exists() and manifest.exists():
+            done_tars = set(done_file.read_text().split())
+            done_subs = {f"{ti:04d}" for ti, t in enumerate(tars) if t in done_tars}
+            keep = [l for l in open(manifest)
+                    if Path(l.split("\t")[0]).parent.name in done_subs]
+            with open(manifest, "w") as f_:
+                f_.writelines(keep)
+            for l in keep:
+                sec += float(l.rstrip("\n").split("\t")[1])
+                n += 1
+            mode = "a"
+            print(f"  resume: {len(done_tars)} tars, {sec/3600:.2f} h done", flush=True)
+        elif not getattr(args, "resume", False):
+            done_file.unlink(missing_ok=True)
+        with open(manifest, mode) as mf:
             for ti, tar_name in enumerate(tars):
+                if tar_name in done_tars:
+                    continue
                 if args.max_hours and sec >= args.max_hours * 3600:
                     break
                 tar_path = _hf_retry(hf_hub_download, "amphion/Emilia-Dataset",
@@ -247,6 +300,9 @@ def cmd_emilia(args):
                         os.remove(p)
                     except OSError:
                         pass
+                mf.flush()
+                with open(done_file, "a") as f_:
+                    f_.write(tar_name + "\n")
                 print(f"  {tar_name}: total {n} files, {sec/3600:.2f} h", flush=True)
         print(f"DONE emilia_{lang.lower()}: {n} files, {sec/3600:.2f} h", flush=True)
 
@@ -260,7 +316,8 @@ def cmd_expresso(args):
     ds = load_dataset("ylacombe/expresso", split="train", streaming=True)
     ds = ds.cast_column("audio", Audio(decode=False))
     _write_stream(ds, DATA_ROOT / "audio" / "expresso",
-                  _manifest_path("resynth", "expresso"), max_hours=args.max_hours)
+                  _manifest_path("resynth", "expresso"), max_hours=args.max_hours,
+                  resume=getattr(args, "resume", False))
 
 
 def cmd_globe(args):
@@ -268,15 +325,16 @@ def cmd_globe(args):
     ds = load_dataset("MushanW/GLOBE_V2", split="train", streaming=True)
     ds = ds.cast_column("audio", Audio(decode=False))
     _write_stream(ds, DATA_ROOT / "audio" / "globe",
-                  _manifest_path("resynth", "globe"), max_hours=args.max_hours)
+                  _manifest_path("resynth", "globe"), max_hours=args.max_hours,
+                  resume=getattr(args, "resume", False))
 
 
 def cmd_gtsinger(args):
     """GTSinger (gated). Downloads the repo's wav files via snapshot_download."""
     from huggingface_hub import snapshot_download
-    local = snapshot_download("GTSinger/GTSinger", repo_type="dataset",
-                              allow_patterns=["*.wav", "*.flac"],
-                              local_dir=DATA_ROOT / "audio" / "gtsinger")
+    local = _hf_retry(snapshot_download, "GTSinger/GTSinger", repo_type="dataset",
+                      allow_patterns=["*.wav", "*.flac"], max_workers=4,
+                      local_dir=DATA_ROOT / "audio" / "gtsinger")
     make_manifest_from_dir(Path(local), _manifest_path("resynth", "gtsinger"),
                            max_hours=args.max_hours)
 
@@ -382,6 +440,8 @@ def main():
                        help="fleurs/fleurs_r only: train|dev|test")
         p.add_argument("--keep-archives", action="store_true",
                        help="fleurs/fleurs_r only: keep cached tarballs")
+        p.add_argument("--resume", action="store_true",
+                       help="continue an interrupted download")
     p = sub.add_parser("noise"); p.add_argument("--run", action="store_true")
     p = sub.add_parser("rir"); p.add_argument("--gtu", action="store_true")
     p = sub.add_parser("speech_clips"); p.add_argument("--num-clips", type=int, default=20000)
