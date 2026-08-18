@@ -168,26 +168,87 @@ def cmd_mls(args):
                       max_hours=args.max_hours)
 
 
+def _hf_retry(fn, *a, retries=8, **kw):
+    """Call a huggingface_hub function with exponential backoff on 429/5xx."""
+    import time
+    from huggingface_hub.errors import HfHubHTTPError
+    for attempt in range(retries):
+        try:
+            return fn(*a, **kw)
+        except HfHubHTTPError as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code not in (429, 500, 502, 503) or attempt == retries - 1:
+                raise
+            wait = min(60 * (attempt + 1), 300)
+            print(f"  HTTP {code}, retry in {wait}s", flush=True)
+            time.sleep(wait)
+
+
 def cmd_emilia(args):
-    from datasets import load_dataset, Audio
+    """Emilia (gated): download the WebDataset tars directly and extract the
+    mp3 files; durations come from the paired json metadata."""
+    import json as jsonlib
+    import tarfile
+    from huggingface_hub import hf_hub_download, list_repo_tree
     langs = args.languages or EMILIA_LANGS
     for lang in langs:
-        print(f"[emilia] {lang} (gated: requires accepted terms + HF_TOKEN)")
-        ds = load_dataset("amphion/Emilia-Dataset", data_dir=f"Emilia/{lang}",
-                          split="train", streaming=True)
-        akey = next((k for k in ("mp3", "wav", "flac", "audio")
-                     if k in (ds.column_names or ["mp3"])), "mp3")
-        ds = ds.cast_column(akey, Audio(decode=False))
-        def gen():
-            for ex in ds:
-                if akey not in ex:
-                    continue
-                meta = ex.get("json") or {}
-                yield {"audio": ex[akey],
-                       "duration": meta.get("duration") if isinstance(meta, dict) else None}
-        _write_stream(gen(), DATA_ROOT / "audio" / "emilia" / lang,
-                      _manifest_path("content", f"emilia_{lang.lower()}"),
-                      max_hours=args.max_hours)
+        print(f"[emilia] {lang}", flush=True)
+        tars = sorted(e.path for e in _hf_retry(
+            lambda: list(list_repo_tree("amphion/Emilia-Dataset", f"Emilia/{lang}",
+                                        repo_type="dataset")))
+            if e.path.endswith(".tar"))
+        out_dir = DATA_ROOT / "audio" / "emilia" / lang
+        manifest = _manifest_path("content", f"emilia_{lang.lower()}")
+        sec, n = 0.0, 0
+        with open(manifest, "w") as mf:
+            for ti, tar_name in enumerate(tars):
+                if args.max_hours and sec >= args.max_hours * 3600:
+                    break
+                tar_path = _hf_retry(hf_hub_download, "amphion/Emilia-Dataset",
+                                     tar_name, repo_type="dataset")
+                sub = out_dir / f"{ti:04d}"
+                sub.mkdir(parents=True, exist_ok=True)
+                durations = {}
+                with tarfile.open(tar_path) as tf:
+                    members = tf.getmembers()
+                    for m in members:  # first pass: json metadata
+                        if m.isfile() and m.name.endswith(".json"):
+                            try:
+                                meta = jsonlib.load(tf.extractfile(m))
+                                durations[Path(m.name).stem] = float(meta.get("duration", 0))
+                            except Exception:
+                                pass
+                    for m in members:
+                        if not m.isfile() or not m.name.endswith((".mp3", ".wav", ".flac")):
+                            continue
+                        stem = Path(m.name).stem
+                        dur = durations.get(stem)
+                        dst = sub / Path(m.name).name
+                        with tf.extractfile(m) as fin, open(dst, "wb") as fout:
+                            fout.write(fin.read())
+                        if dur is None:
+                            try:
+                                dur = sf.info(dst).duration
+                            except Exception:
+                                dst.unlink(missing_ok=True)
+                                continue
+                        if dur < 1.0:
+                            dst.unlink(missing_ok=True)
+                            continue
+                        mf.write(f"{dst.resolve()}\t{dur:.2f}\n")
+                        sec += dur
+                        n += 1
+                        if args.max_hours and sec >= args.max_hours * 3600:
+                            break
+                # free the cached tarball
+                real = os.path.realpath(tar_path)
+                for p in (tar_path, real):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+                print(f"  {tar_name}: total {n} files, {sec/3600:.2f} h", flush=True)
+        print(f"DONE emilia_{lang.lower()}: {n} files, {sec/3600:.2f} h", flush=True)
 
 
 def cmd_fleurs_r(args):
