@@ -1,7 +1,14 @@
 #!/bin/bash
 # One-time environment setup on kiz0 (run on the login node; internet is direct).
 set -e
-export SYLBER2_ROOT="${SYLBER2_ROOT:-/nfs1/scratch/$USER/sylber2}"
+# Auto-detect the scratch root on kiz0 (students vs staff)
+if [ -z "$SYLBER2_ROOT" ]; then
+    for base in /nfs1/scratch/students/$USER /nfs1/scratch/staff/$USER; do
+        if [ -d "$base" ]; then SYLBER2_ROOT="$base/sylber2"; break; fi
+    done
+    SYLBER2_ROOT="${SYLBER2_ROOT:-$HOME/sylber2}"
+fi
+export SYLBER2_ROOT
 mkdir -p "$SYLBER2_ROOT"
 cd "$SYLBER2_ROOT"
 
