@@ -60,7 +60,8 @@ echo "=== inference ==="
 python - <<PY
 import glob, soundfile as sf, numpy as np, os
 from sylber2.inference import Segmenter2
-wavs = sorted(glob.glob(os.environ["SYLBER2_DATA"] + "/audio/fleurs/*/*.flac"))
+wavs = sorted(glob.glob(os.environ["SYLBER2_DATA"] + "/audio/fleurs/*/*.wav") +
+              glob.glob(os.environ["SYLBER2_DATA"] + "/audio/fleurs/*/*.flac"))
 seg = Segmenter2("$CKPT4", synthesis_ckpt="$CKPT_V2", device="cuda")
 out = seg(wav_file=wavs[0])
 print("segments:", out["segments"][:5], "... total", len(out["segments"]))
