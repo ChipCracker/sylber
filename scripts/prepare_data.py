@@ -340,21 +340,35 @@ def cmd_gtsinger(args):
 
 
 def cmd_noise(args):
-    """DNS-Challenge fullband noise via the official download script."""
+    """DNS-Challenge fullband noise. The official script only dry-runs (its
+    download lines are commented out), so we parse its blob list and download
+    the noise archives ourselves with curl -C - (resumable), then extract."""
+    import re
     out = DATA_ROOT / "noise"
     out.mkdir(parents=True, exist_ok=True)
     url = ("https://raw.githubusercontent.com/microsoft/DNS-Challenge/master/"
            "download-dns-challenge-5-noise-ir.sh")
     script = out / "download-dns5-noise-ir.sh"
     subprocess.run(["curl", "-sL", "-o", str(script), url], check=True)
-    print(f"Official DNS script saved to {script}.")
-    print("It downloads noise_fullband archives; run (large download!):")
-    print(f"  cd {out} && bash {script.name} && "
-          r"find . -name '*.tar.bz2' -exec tar xjf {} \;")
-    if args.run:
-        subprocess.run(["bash", str(script.name)], cwd=out, check=True)
-        subprocess.run(r"find . -name '*.tar.bz2' -exec tar xjf {} \;",
-                       shell=True, cwd=out, check=True)
+    text = script.read_text()
+    m = re.search(r'AZURE_URL="?([^"\n]+)"?', text)
+    base_url = m.group(1).strip() if m else \
+        "https://dnschallengepublic.blob.core.windows.net/dns5archive/V5_training_dataset"
+    blobs = re.findall(r"^\s*([\w./-]+\.tar\.bz2)\s*$", text, re.M)
+    noise_blobs = [b for b in blobs if "noise" in b]
+    print(f"{len(noise_blobs)} noise archives, base {base_url}")
+    if not args.run:
+        print("Dry run. Re-run with --run to download and extract.")
+        return
+    for blob in noise_blobs:
+        dst = out / Path(blob).name
+        print(f"[noise] {blob}", flush=True)
+        subprocess.run(["curl", "-L", "-C", "-", "-o", str(dst),
+                        f"{base_url}/{blob}"], check=True)
+        subprocess.run(["tar", "xjf", str(dst), "-C", str(out)], check=True)
+        dst.unlink()
+    n = sum(1 for _ in out.rglob("*.wav"))
+    print(f"DONE noise: {n} wav files under {out}")
 
 
 def cmd_rir(args):
