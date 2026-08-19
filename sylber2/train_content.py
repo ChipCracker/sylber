@@ -5,9 +5,16 @@ Usage:
     python -m sylber2.train_content --config-name content_stage2 \\
         model_ckpt=outputs/stage1/last.ckpt
 """
+import os
+import faulthandler
 import torch
 import hydra
 import lightning as pl
+
+if os.environ.get("SYLBER2_WATCHDOG"):
+    # periodically dump all thread stacks to stderr to diagnose hangs
+    faulthandler.dump_traceback_later(int(os.environ["SYLBER2_WATCHDOG"]),
+                                      repeat=True)
 from omegaconf import OmegaConf
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 

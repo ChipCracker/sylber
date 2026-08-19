@@ -7,9 +7,16 @@ Usage:
     python -m sylber2.train_vocoder --config-name vocoder_cycle2 \\
         model.content_ckpt=... warm_start_ckpt=outputs/cycle1/last.ckpt
 """
+import os
+import faulthandler
 import torch
 import hydra
 import lightning as pl
+
+if os.environ.get("SYLBER2_WATCHDOG"):
+    # periodically dump all thread stacks to stderr to diagnose hangs
+    faulthandler.dump_traceback_later(int(os.environ["SYLBER2_WATCHDOG"]),
+                                      repeat=True)
 from omegaconf import OmegaConf
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
