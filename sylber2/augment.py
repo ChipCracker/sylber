@@ -22,6 +22,14 @@ import soundfile as sf
 import librosa
 
 
+try:
+    import parselmouth
+    from parselmouth.praat import call as praat_call
+    HAS_PARSELMOUTH = True
+except ImportError:  # pragma: no cover
+    HAS_PARSELMOUTH = False
+
+
 def _forked_with_timeout(fn, timeout=8.0):
     """Run fn() in a forked child process and return its np.ndarray result,
     or None on failure/timeout. Praat is not async-signal interruptible and
