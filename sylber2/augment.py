@@ -12,11 +12,42 @@
 All operations preserve the signal length (duration factor 1.0) so that frame
 alignment is kept.
 """
+import signal
+import threading
 import numpy as np
 from pathlib import Path
 from scipy.signal import fftconvolve
 import soundfile as sf
 import librosa
+
+
+class _PraatTimeout(Exception):
+    pass
+
+
+class _alarm_guard:
+    """Hard SIGALRM timeout around native calls that may deadlock (Praat is
+    not fork-safe and can hang after thousands of calls). Only active in a
+    process main thread; otherwise a no-op."""
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+        self.active = threading.current_thread() is threading.main_thread()
+
+    def _raise(self, *a):
+        raise _PraatTimeout()
+
+    def __enter__(self):
+        if self.active:
+            self._old = signal.signal(signal.SIGALRM, self._raise)
+            signal.alarm(self.seconds)
+        return self
+
+    def __exit__(self, *exc):
+        if self.active:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, self._old)
+        return False
 
 try:
     import parselmouth
@@ -55,14 +86,15 @@ def random_formant_perturb(wav, sr,
     else:
         ps, pr = 1.0, 1.0
     try:
-        snd = parselmouth.Sound(wav.astype(np.float64), sampling_frequency=sr)
-        pitch = snd.to_pitch()
-        f0_vals = pitch.selected_array['frequency']
-        f0_vals = f0_vals[f0_vals > 0]
-        median_f0 = float(np.median(f0_vals)) if len(f0_vals) else 0.0
-        new_median = median_f0 * ps if median_f0 > 0 else 0.0
-        out = praat_call(snd, "Change gender", 75, 600, fs, new_median, pr, 1.0)
-        y = out.values[0].astype(np.float32)
+        with _alarm_guard(10):
+            snd = parselmouth.Sound(wav.astype(np.float64), sampling_frequency=sr)
+            pitch = snd.to_pitch()
+            f0_vals = pitch.selected_array['frequency']
+            f0_vals = f0_vals[f0_vals > 0]
+            median_f0 = float(np.median(f0_vals)) if len(f0_vals) else 0.0
+            new_median = median_f0 * ps if median_f0 > 0 else 0.0
+            out = praat_call(snd, "Change gender", 75, 600, fs, new_median, pr, 1.0)
+            y = out.values[0].astype(np.float32)
     except Exception:
         return wav
     if len(y) < len(wav):

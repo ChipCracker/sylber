@@ -102,6 +102,8 @@ class ContentDataset(Dataset):
             path = self.sources.sample()
             try:
                 dur = sf.info(path).duration
+                if dur > 600:  # skip pathological files (full-decode cost)
+                    continue
                 off = np.random.uniform(0, max(dur - self.crop_seconds, 0))
                 y, _ = _load_audio(path, self.sr, off, self.crop_seconds)
             except Exception:
