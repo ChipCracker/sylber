@@ -35,11 +35,19 @@ def _load_manifest(path):
 
 
 def _load_audio(path, target_sr, offset_sec=None, duration_sec=None):
-    """Load (a crop of) an audio file, mono, resampled to target_sr."""
+    """Load (a crop of) an audio file, mono, resampled to target_sr.
+
+    mp3 files are decoded fully and cropped in memory: libsndfile/mpg123 frame
+    seeking is unreliable and floods stderr with layer3 errors."""
     info = sf.info(path)
     sr = info.samplerate
     if offset_sec is None:
         y, _ = sf.read(path, dtype="float32", always_2d=True)
+    elif str(path).lower().endswith(".mp3"):
+        y, _ = sf.read(path, dtype="float32", always_2d=True)
+        start = int(offset_sec * sr)
+        frames = int(duration_sec * sr) if duration_sec else len(y)
+        y = y[start:start + frames]
     else:
         start = int(offset_sec * sr)
         frames = int(duration_sec * sr) if duration_sec else -1

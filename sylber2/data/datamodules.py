@@ -51,7 +51,8 @@ class ContentDataModule(LightningDataModule):
         ds = self._make(self.train_sources, self.dummy_len, augment=True)
         return DataLoader(ds, batch_size=self.batch_size, num_workers=self.num_workers,
                           collate_fn=ContentDataset.collate, drop_last=True,
-                          pin_memory=True, persistent_workers=self.num_workers > 0)
+                          pin_memory=True, persistent_workers=self.num_workers > 0,
+                          timeout=600 if self.num_workers else 0)
 
     def val_dataloader(self):
         ds = self._make(self.val_sources, 500, augment=False)
@@ -81,7 +82,8 @@ class ResynthesisDataModule(LightningDataModule):
                                 **self.perturb, **self.kw)
         return DataLoader(ds, batch_size=self.batch_size, num_workers=self.num_workers,
                           collate_fn=ResynthesisDataset.collate, drop_last=True,
-                          pin_memory=True, persistent_workers=self.num_workers > 0)
+                          pin_memory=True, persistent_workers=self.num_workers > 0,
+                          timeout=600 if self.num_workers else 0)
 
     def val_dataloader(self):
         ds = ResynthesisDataset(self.val_sources, dummy_len=200,

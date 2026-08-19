@@ -13,6 +13,9 @@ export HF_HOME="${HF_HOME:-$SYLBER2_ROOT/hf_cache}"
 export REPO="$SYLBER2_ROOT/sylber"
 export VENV="$SYLBER2_ROOT/venv"
 export PYTHONUNBUFFERED=1
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export TOKENIZERS_PARALLELISM=false
 export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$SYLBER2_DATA" "$HF_HOME" "$SYLBER2_ROOT/outputs"
 cd "$REPO"

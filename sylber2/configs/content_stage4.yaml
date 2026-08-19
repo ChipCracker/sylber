@@ -19,7 +19,7 @@ data:
   train_sources: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/manifests/content
   source_weights: {fleurs: 2.0, default: 1.0}
   batch_size: 50
-  num_workers: 16
+  num_workers: 12
   dummy_len: 500000
   crop_seconds: 5.0
   both_augmented: false     # stages 2-4: teacher input is clean
