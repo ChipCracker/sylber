@@ -12,7 +12,11 @@ ap.add_argument("--formant-prob", type=float, default=0.3)
 ap.add_argument("--context", default=None, choices=[None, "fork", "spawn", "forkserver"])
 ap.add_argument("--batches", type=int, default=8)
 ap.add_argument("--batch-size", type=int, default=24)
+ap.add_argument("--seed", type=int, default=None)
 args = ap.parse_args()
+if args.seed is not None:
+    import lightning as pl
+    pl.seed_everything(args.seed)
 
 DATA = os.environ["SYLBER2_DATA"]
 sources = resolve_sources(f"{DATA}/manifests/content", {"fleurs": 2.0, "default": 1.0})

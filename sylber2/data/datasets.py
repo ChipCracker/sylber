@@ -12,6 +12,8 @@ perturbed).
 Manifest format: one TSV per source; each line is an absolute audio path
 (optionally `path\tduration_sec`). Sources are given as [weight, path] pairs.
 """
+import os
+import time
 import numpy as np
 import soundfile as sf
 import librosa
@@ -97,9 +99,16 @@ class ContentDataset(Dataset):
     def __len__(self):
         return self.dummy_len
 
+    def _trace(self, msg):
+        d = os.environ.get("SYLBER2_TRACE_DIR")
+        if d:
+            with open(f"{d}/worker_{os.getpid()}.log", "a") as f:
+                f.write(f"{time.time():.3f} {msg}\n")
+
     def _sample_crop(self):
         for _ in range(5):
             path = self.sources.sample()
+            self._trace(f"LOAD {path}")
             try:
                 dur = sf.info(path).duration
                 if dur > 600:  # skip pathological files (full-decode cost)
@@ -121,8 +130,11 @@ class ContentDataset(Dataset):
 
     def __getitem__(self, i):
         y = self._sample_crop()
+        self._trace("AUG student")
         student = self.augment(y)
+        self._trace("AUG teacher")
         teacher = self.augment(y) if self.both_augmented else y
+        self._trace("ITEM done")
         return {"student_input": torch.from_numpy(self._znorm(student)),
                 "teacher_input": torch.from_numpy(self._znorm(teacher))}
 
