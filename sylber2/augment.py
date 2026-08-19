@@ -12,8 +12,9 @@
 All operations preserve the signal length (duration factor 1.0) so that frame
 alignment is kept.
 """
+import os
 import signal
-import threading
+import time
 import numpy as np
 from pathlib import Path
 from scipy.signal import fftconvolve
@@ -21,40 +22,53 @@ import soundfile as sf
 import librosa
 
 
-class _PraatTimeout(Exception):
-    pass
-
-
-class _alarm_guard:
-    """Hard SIGALRM timeout around native calls that may deadlock (Praat is
-    not fork-safe and can hang after thousands of calls). Only active in a
-    process main thread; otherwise a no-op."""
-
-    def __init__(self, seconds):
-        self.seconds = seconds
-        self.active = threading.current_thread() is threading.main_thread()
-
-    def _raise(self, *a):
-        raise _PraatTimeout()
-
-    def __enter__(self):
-        if self.active:
-            self._old = signal.signal(signal.SIGALRM, self._raise)
-            signal.alarm(self.seconds)
-        return self
-
-    def __exit__(self, *exc):
-        if self.active:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, self._old)
-        return False
-
-try:
-    import parselmouth
-    from parselmouth.praat import call as praat_call
-    HAS_PARSELMOUTH = True
-except ImportError:  # pragma: no cover
-    HAS_PARSELMOUTH = False
+def _forked_with_timeout(fn, timeout=8.0):
+    """Run fn() in a forked child process and return its np.ndarray result,
+    or None on failure/timeout. Praat is not async-signal interruptible and
+    can deadlock in native code on rare inputs, so a hard SIGKILL timeout in
+    a separate process is the only reliable guard. The child writes its
+    result to a temp file and exits via os._exit (no atexit handlers)."""
+    import tempfile
+    import uuid
+    path = Path(tempfile.gettempdir()) / f"praat_{uuid.uuid4().hex}.npy"
+    pid = os.fork()
+    if pid == 0:  # child
+        code = 1
+        try:
+            np.save(path, fn())
+            code = 0
+        except BaseException:
+            pass
+        finally:
+            os._exit(code)
+    deadline = time.time() + timeout
+    status = None
+    while time.time() < deadline:
+        done, st = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = st
+            break
+        time.sleep(0.02)
+    if status is None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+        status = -1
+    result = None
+    if status == 0 or (isinstance(status, int) and status >= 0 and
+                       os.waitstatus_to_exitcode(status) == 0):
+        try:
+            if path.exists():
+                result = np.load(path)
+        except Exception:
+            result = None
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return result
 
 
 def _rms(x):
@@ -85,17 +99,19 @@ def random_formant_perturb(wav, sr,
         pr = np.random.uniform(*pitch_range_range) ** np.random.choice([-1, 1])
     else:
         ps, pr = 1.0, 1.0
-    try:
-        with _alarm_guard(10):
-            snd = parselmouth.Sound(wav.astype(np.float64), sampling_frequency=sr)
-            pitch = snd.to_pitch()
-            f0_vals = pitch.selected_array['frequency']
-            f0_vals = f0_vals[f0_vals > 0]
-            median_f0 = float(np.median(f0_vals)) if len(f0_vals) else 0.0
-            new_median = median_f0 * ps if median_f0 > 0 else 0.0
-            out = praat_call(snd, "Change gender", 75, 600, fs, new_median, pr, 1.0)
-            y = out.values[0].astype(np.float32)
-    except Exception:
+    def _job():
+        snd = parselmouth.Sound(wav.astype(np.float64), sampling_frequency=sr)
+        pitch = snd.to_pitch()
+        f0_vals = pitch.selected_array['frequency']
+        f0_vals = f0_vals[f0_vals > 0]
+        median_f0 = float(np.median(f0_vals)) if len(f0_vals) else 0.0
+        # keep the new median in a sane range; degenerate values can stall Praat
+        new_median = float(np.clip(median_f0 * ps, 55.0, 480.0)) if median_f0 > 0 else 0.0
+        out = praat_call(snd, "Change gender", 75, 600, fs, new_median, pr, 1.0)
+        return out.values[0].astype(np.float32)
+
+    y = _forked_with_timeout(_job, timeout=8.0)
+    if y is None:
         return wav
     if len(y) < len(wav):
         y = np.pad(y, (0, len(wav) - len(y)))
