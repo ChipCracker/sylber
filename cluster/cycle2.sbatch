@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=128G
-#SBATCH --time=14-00:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=%x-%j.out
 set -e
 # locate common.sh: sbatch copies the script to a spool dir, so $0 is useless there
