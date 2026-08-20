@@ -16,6 +16,9 @@ export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 export TOKENIZERS_PARALLELISM=false
+# cap glibc malloc arenas: audio libs in long-lived dataloader workers
+# otherwise fragment RSS toward the cgroup limit
+export MALLOC_ARENA_MAX=2
 export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$SYLBER2_DATA" "$HF_HOME" "$SYLBER2_ROOT/outputs"
 cd "$REPO"

@@ -20,7 +20,7 @@ data:
   source_weights: {fleurs: 2.0, default: 1.0}
   batch_size: 50
   num_workers: 12
-  dummy_len: 500000
+  dummy_len: 432000
   crop_seconds: 5.0
   both_augmented: false     # stages 2-4: teacher input is clean
   augment_configs:
@@ -28,7 +28,7 @@ data:
     rir_dir: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/rir
     speech_dir: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/speech_clips
 max_steps: 100000
-checkpoint_every_steps: 25000
+checkpoint_every_steps: 5000
 model_ckpt: ???
 resume_ckpt: null
 devices: 1

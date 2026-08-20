@@ -4,14 +4,22 @@
 #SBATCH --qos=gpuultimate
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=24
-#SBATCH --mem=128G
+#SBATCH --mem=256G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=%x-%j.out
-set -e
+set +e
 export SYLBER2_WATCHDOG=1800
 # locate common.sh: sbatch copies the script to a spool dir, so $0 is useless there
 source "${SLURM_SUBMIT_DIR:-.}/cluster/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 OUT="$SYLBER2_ROOT/outputs/cycle3"
 mkdir -p "$OUT" && cd "$OUT"
-python -m sylber2.train_vocoder --config-name vocoder_cycle3 \
-    hydra.run.dir="$OUT/run" name="$OUT/run" model.content_ckpt=$SYLBER2_ROOT/outputs/stage4/run/lightning_logs/version_0/checkpoints/last.ckpt warm_start_ckpt=$SYLBER2_ROOT/outputs/cycle2/run/lightning_logs/version_0/checkpoints/last.ckpt "$@"
+for attempt in 1 2 3 4 5; do
+  LATEST=$(ls -t "$OUT"/run/lightning_logs/*/checkpoints/last.ckpt 2>/dev/null | head -1)
+  echo "=== attempt $attempt (resume: ${LATEST:-none}) ==="
+  if python -m sylber2.train_vocoder --config-name vocoder_cycle3 hydra.run.dir="$OUT/run" name="$OUT/run" model.content_ckpt=$SYLBER2_ROOT/outputs/stage4/run/lightning_logs/version_0/checkpoints/last.ckpt warm_start_ckpt=$SYLBER2_ROOT/outputs/cycle2/run/lightning_logs/version_0/checkpoints/last.ckpt ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
+    echo "=== training finished ==="
+    break
+  fi
+  echo "=== attempt $attempt failed, retrying from latest checkpoint ==="
+  sleep 30
+done
