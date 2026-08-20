@@ -76,11 +76,20 @@ class Sylber2(nn.Module):
                 self.teacher_boundary = copy.deepcopy(self.student.boundary_detector)
                 self.teacher_boundary.requires_grad_(False).eval()
 
+    def _sync_teacher_device(self):
+        """EMAModule is not an nn.Module attribute, so Lightning's .to(device)
+        does not move it (e.g. after on_load_checkpoint restores it on CPU)."""
+        if self.ema is not None:
+            dev = next(self.student.backbone.parameters()).device
+            if next(self.ema.model.parameters()).device != dev:
+                self.ema.model.to(dev)
+
     def ema_step(self):
         if self.stage == 1:
             if self.ema is None:
                 self.setup_teacher()
             else:
+                self._sync_teacher_device()
                 self.ema.step(self.student.backbone)
 
     def _teacher_model(self):
@@ -97,6 +106,7 @@ class Sylber2(nn.Module):
     # ------------------------------------------------------------------ forward
     def forward(self, student_input, teacher_input, **kwargs):
         self.setup_teacher()
+        self._sync_teacher_device()
         device = student_input.device
 
         with torch.no_grad():
