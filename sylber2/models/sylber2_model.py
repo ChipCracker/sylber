@@ -40,6 +40,8 @@ class Sylber2(nn.Module):
                  peak_min_height=0.2,
                  peak_prominence=0.05,
                  peak_prob_override=0.8,
+                 center_targets=True,
+                 center_decay=0.99,
                  load_pretrained=True,
                  encoder_kwargs=None,
                  **kwargs):
@@ -56,6 +58,17 @@ class Sylber2(nn.Module):
         self.student = ContentEncoder(speech_upstream=speech_upstream,
                                       load_pretrained=load_pretrained and stage == 1,
                                       **(encoder_kwargs or {}))
+        # DINO-style centering of the stage-1 teacher targets. The paper's
+        # BYOL-like recipe (EMA teacher + student FC head) collapsed in our
+        # runs (all pairwise cosine similarities -> 1.0 after 100k steps);
+        # subtracting a running center before L2-normalization is the
+        # standard remedy for EMA self-distillation (Caron et al., 2021).
+        self.center_targets = center_targets and stage == 1
+        self.center_decay = center_decay
+        self.register_buffer("target_center",
+                             torch.zeros(self.student.enc_dim), persistent=True)
+        self.register_buffer("center_initialized",
+                             torch.zeros(1), persistent=True)
         # teacher holders (built in setup_teacher, not part of state_dict)
         self.ema = None
         self.teacher_backbone = None
@@ -117,8 +130,30 @@ class Sylber2(nn.Module):
         B, L, D = student_pred.shape
 
         if self.stage == 1:
-            target = F.normalize(trg_l8, dim=-1)
+            if self.center_targets:
+                with torch.no_grad():
+                    batch_mean = trg_l8.float().mean(dim=(0, 1))
+                    if self.training:
+                        if self.center_initialized.item() == 0:
+                            self.target_center.copy_(batch_mean)
+                            self.center_initialized.fill_(1)
+                        else:
+                            self.target_center.mul_(self.center_decay).add_(
+                                batch_mean, alpha=1 - self.center_decay)
+                target = F.normalize(trg_l8 - self.target_center.to(trg_l8.dtype),
+                                     dim=-1)
+            else:
+                target = F.normalize(trg_l8, dim=-1)
             outputs['distillation_loss'] = ((student_pred - target) ** 2).sum(-1).mean()
+            with torch.no_grad():
+                # collapse early-warning: mean pairwise cosine similarity of
+                # raw teacher features across random frames (1.0 == collapsed)
+                flat = trg_l8.float().reshape(-1, trg_l8.shape[-1])
+                idx = torch.randperm(flat.shape[0], device=flat.device)[:256]
+                sub = F.normalize(flat[idx], dim=-1)
+                sim = sub @ sub.T
+                n = sim.shape[0]
+                outputs['target_sim'] = ((sim.sum() - n) / (n * (n - 1))).detach()
             return outputs
 
         # ---- stages 2-4: segment targets from the teacher

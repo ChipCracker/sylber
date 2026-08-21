@@ -39,7 +39,7 @@ class ContentTrainer(LightningModule):
             if name in outputs:
                 loss = loss + coef * outputs[name]
                 self.log(f"train_{name}", outputs[name], sync_dist=True)
-        for name in ("num_segments", "boundary_f1_proxy"):
+        for name in ("num_segments", "boundary_f1_proxy", "target_sim"):
             if name in outputs:
                 self.log(f"train_{name}", outputs[name], sync_dist=True)
         self.log("train_loss", loss, prog_bar=True)

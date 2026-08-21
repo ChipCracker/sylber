@@ -53,3 +53,12 @@ documents every assumption made in this implementation.
     probability of an individual language").
 17. **Validation**: small held-back sampling of the training sources without
     augmentation (the paper does not describe a validation protocol).
+18. **Stage-1 target centering (necessary deviation)**: the paper's stage-1
+    recipe (EMA teacher, L2-normalized targets, single student FC head)
+    collapsed in our reproduction — after 100k steps every frame produced the
+    same direction (pairwise cosine similarity 1.0, greedy segmentation
+    degenerated to one segment per clip, stage-2 loss went to 0). We
+    therefore subtract a DINO-style running center (decay 0.99) from the
+    teacher's layer-8 features before L2 normalization in stage 1 (only);
+    stages 2-4 use a frozen teacher and need no centering. `target_sim` is
+    logged as a collapse early-warning metric (≈1.0 ⇒ collapsed).
