@@ -11,7 +11,7 @@ set +e
 export SYLBER2_WATCHDOG=1800
 # locate common.sh: sbatch copies the script to a spool dir, so $0 is useless there
 source "${SLURM_SUBMIT_DIR:-.}/cluster/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
-OUT="$SYLBER2_ROOT/outputs/stage4"
+OUT="$SYLBER2_ROOT/outputs/${SYLBER2_RUN_NAME:-stage4}"
 mkdir -p "$OUT" && cd "$OUT"
 for attempt in 1 2 3 4 5; do
   LATEST=$(ls -t "$OUT"/run/lightning_logs/*/checkpoints/last.ckpt 2>/dev/null | head -1)
