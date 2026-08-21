@@ -13,7 +13,7 @@ export SYLBER2_WATCHDOG=1800
 source "${SLURM_SUBMIT_DIR:-.}/cluster/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 OUT="$SYLBER2_ROOT/outputs/${SYLBER2_RUN_NAME:-stage2}"
 mkdir -p "$OUT" && cd "$OUT"
-for attempt in 1 2 3 4 5; do
+for attempt in $(seq 1 20); do
   LATEST=$(ls -t "$OUT"/run/lightning_logs/*/checkpoints/last.ckpt 2>/dev/null | head -1)
   echo "=== attempt $attempt (resume: ${LATEST:-none}) ==="
   if python -m sylber2.train_content --config-name content_stage2 hydra.run.dir="$OUT/run" name="$OUT/run" model_ckpt=$(ls -t $SYLBER2_ROOT/outputs/stage1/run/lightning_logs/*/checkpoints/last.ckpt | head -1) ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
