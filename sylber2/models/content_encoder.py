@@ -133,9 +133,10 @@ class ContentEncoder(nn.Module):
                             output_hidden_states=output_hidden_states)
         return out
 
-    def student_frames(self, input_values, attention_mask=None):
+    def student_frames(self, input_values, attention_mask=None, mask_time_indices=None):
         """Student prediction: last layer + student head. Returns (frames, head_out)."""
-        h = self.backbone(input_values, attention_mask=attention_mask).last_hidden_state
+        h = self.backbone(input_values, attention_mask=attention_mask,
+                          mask_time_indices=mask_time_indices).last_hidden_state
         pred = self.student_head(h) if self.student_head is not None else h
         return h, pred
 

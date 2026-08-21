@@ -42,6 +42,9 @@ class Sylber2(nn.Module):
                  peak_prob_override=0.8,
                  center_targets=True,
                  center_decay=0.99,
+                 mask_prob=0.065,
+                 mask_span=10,
+                 var_coef=1.0,
                  load_pretrained=True,
                  encoder_kwargs=None,
                  **kwargs):
@@ -65,6 +68,13 @@ class Sylber2(nn.Module):
         # standard remedy for EMA self-distillation (Caron et al., 2021).
         self.center_targets = center_targets and stage == 1
         self.center_decay = center_decay
+        # data2vec-style masked prediction + VICReg variance term (stage 1):
+        # plain BYOL-style frame distillation collapsed even with centering
+        # and a BN-MLP predictor; masking makes constant solutions impossible
+        # and the variance hinge keeps per-channel spread alive.
+        self.mask_prob = mask_prob
+        self.mask_span = mask_span
+        self.var_coef = var_coef
         self.register_buffer("target_center",
                              torch.zeros(self.student.enc_dim), persistent=True)
         self.register_buffer("center_initialized",
@@ -126,7 +136,18 @@ class Sylber2(nn.Module):
             trg_l8, trg_l9 = self._teacher_features(teacher_input)
 
         outputs = {}
-        student_frames, student_pred = self.student.student_frames(student_input)
+        mask = None
+        if self.stage == 1 and self.training and self.mask_prob > 0:
+            Lf = trg_l8.shape[1]
+            starts = torch.rand(trg_l8.shape[0], Lf, device=device) < (
+                self.mask_prob / self.mask_span)
+            mask = starts.clone()
+            for off in range(1, self.mask_span):
+                mask[:, off:] |= starts[:, :Lf - off]
+            if not mask.any():
+                mask[:, 0] = True
+        student_frames, student_pred = self.student.student_frames(
+            student_input, mask_time_indices=mask)
         B, L, D = student_pred.shape
 
         if self.stage == 1:
@@ -144,9 +165,18 @@ class Sylber2(nn.Module):
                                      dim=-1)
             else:
                 target = F.normalize(trg_l8, dim=-1)
-            # BYOL loss: normalize both sides (== 2 - 2*cos)
+            # BYOL loss: normalize both sides (== 2 - 2*cos); with masking
+            # active, the loss is computed on masked frames only (data2vec)
             pred_n = F.normalize(student_pred, dim=-1)
-            outputs['distillation_loss'] = ((pred_n - target) ** 2).sum(-1).mean()
+            per_frame = ((pred_n - target) ** 2).sum(-1)
+            if mask is not None:
+                outputs['distillation_loss'] = per_frame[mask].mean()
+            else:
+                outputs['distillation_loss'] = per_frame.mean()
+            if self.var_coef > 0:
+                z = student_pred.float().reshape(-1, D)
+                std = torch.sqrt(z.var(dim=0) + 1e-4)
+                outputs['variance_loss'] = F.relu(1.0 - std).mean()
             with torch.no_grad():
                 # collapse early-warning: mean pairwise cosine similarity of
                 # CENTERED teacher features across random frames (1.0 == collapsed)

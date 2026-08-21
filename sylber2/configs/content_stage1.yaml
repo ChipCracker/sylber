@@ -13,6 +13,7 @@ model:
   weight_decay: 1.0e-3
   loss_coefs:
     distillation_loss: 1.0
+    variance_loss: 1.0
 data:
   train_sources: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/manifests/content
   source_weights: {fleurs: 2.0, default: 1.0}
