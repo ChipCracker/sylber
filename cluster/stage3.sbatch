@@ -18,8 +18,11 @@ for attempt in 1 2 3 4 5; do
   echo "=== attempt $attempt (resume: ${LATEST:-none}) ==="
   if python -m sylber2.train_content --config-name content_stage3 hydra.run.dir="$OUT/run" name="$OUT/run" model_ckpt=$(ls -t $SYLBER2_ROOT/outputs/stage2/run/lightning_logs/*/checkpoints/last.ckpt | head -1) ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
     echo "=== training finished ==="
+    TRAINING_OK=1
     break
   fi
   echo "=== attempt $attempt failed, retrying from latest checkpoint ==="
   sleep 30
 done
+# a job that never finished must not report COMPLETED
+[ -n "$TRAINING_OK" ] || exit 1
