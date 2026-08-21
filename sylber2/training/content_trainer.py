@@ -26,6 +26,7 @@ class ContentTrainer(LightningModule):
         self.betas = tuple(betas)
         self.weight_decay = weight_decay
         self.min_factor = min_factor
+        self._collapse_streak = 0
 
     def forward(self, **kwargs):
         return self.net(**kwargs)
@@ -42,6 +43,13 @@ class ContentTrainer(LightningModule):
         for name in ("num_segments", "boundary_f1_proxy", "target_sim"):
             if name in outputs:
                 self.log(f"train_{name}", outputs[name], sync_dist=True)
+        if "target_sim" in outputs and self.global_step > 3000:
+            self._collapse_streak = self._collapse_streak + 1 \
+                if outputs["target_sim"].item() > 0.995 else 0
+            if self._collapse_streak >= 200:
+                raise RuntimeError(
+                    "representation collapse detected (centered target_sim > "
+                    "0.995 for 200 consecutive steps) - aborting run")
         self.log("train_loss", loss, prog_bar=True)
         return loss
 

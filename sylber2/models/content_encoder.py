@@ -53,6 +53,30 @@ class EmbeddingProjector(nn.Module):
         return self.out(self.blocks(x))
 
 
+class PredictorHead(nn.Module):
+    """BYOL-style predictor: Linear -> BatchNorm -> GELU -> Linear.
+
+    The paper describes "an additional fully-connected layer that is not in
+    the teacher"; with a single linear layer (and with DINO-style centering
+    added) our stage-1 self-distillation still collapsed to a single
+    direction. BatchNorm in the predictor is the empirically decisive
+    anti-collapse ingredient in BYOL-type recipes, so we use the standard
+    BYOL predictor here (documented deviation, IMPLEMENTATION_NOTES #18)."""
+
+    def __init__(self, dim, hidden_dim=2048):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, hidden_dim)
+        self.bn = nn.BatchNorm1d(hidden_dim)
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(hidden_dim, dim)
+
+    def forward(self, x):  # (B, L, D)
+        B, L, D = x.shape
+        h = self.fc1(x).reshape(B * L, -1)
+        h = self.act(self.bn(h)).reshape(B, L, -1)
+        return self.fc2(h)
+
+
 class BoundaryDetector(nn.Module):
     """3 Transformer layers (same architecture as the main model) + binary logit."""
 
@@ -98,7 +122,7 @@ class ContentEncoder(nn.Module):
         self.target_layer = target_layer
 
         # student-only FC layer (not in the teacher)
-        self.student_head = nn.Linear(self.enc_dim, self.enc_dim) if with_student_head else None
+        self.student_head = PredictorHead(self.enc_dim) if with_student_head else None
         self.boundary_detector = BoundaryDetector(cfg, boundary_layers) if with_boundary_detector else None
         # residual FC projection to the 64-d content embedding (used in synthesis training)
         self.content_proj = EmbeddingProjector(self.enc_dim, embed_dim, proj_blocks)

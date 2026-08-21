@@ -144,11 +144,13 @@ class Sylber2(nn.Module):
                                      dim=-1)
             else:
                 target = F.normalize(trg_l8, dim=-1)
-            outputs['distillation_loss'] = ((student_pred - target) ** 2).sum(-1).mean()
+            # BYOL loss: normalize both sides (== 2 - 2*cos)
+            pred_n = F.normalize(student_pred, dim=-1)
+            outputs['distillation_loss'] = ((pred_n - target) ** 2).sum(-1).mean()
             with torch.no_grad():
                 # collapse early-warning: mean pairwise cosine similarity of
-                # raw teacher features across random frames (1.0 == collapsed)
-                flat = trg_l8.float().reshape(-1, trg_l8.shape[-1])
+                # CENTERED teacher features across random frames (1.0 == collapsed)
+                flat = (trg_l8.float() - self.target_center.float()).reshape(-1, trg_l8.shape[-1])
                 idx = torch.randperm(flat.shape[0], device=flat.device)[:256]
                 sub = F.normalize(flat[idx], dim=-1)
                 sim = sub @ sub.T
