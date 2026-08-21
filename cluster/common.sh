@@ -19,6 +19,8 @@ export TOKENIZERS_PARALLELISM=false
 # cap glibc malloc arenas: audio libs in long-lived dataloader workers
 # otherwise fragment RSS toward the cgroup limit
 export MALLOC_ARENA_MAX=2
+# dump Python stacks on native crashes (SIGSEGV) in every process
+export PYTHONFAULTHANDLER=1
 export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$SYLBER2_DATA" "$HF_HOME" "$SYLBER2_ROOT/outputs"
 cd "$REPO"
