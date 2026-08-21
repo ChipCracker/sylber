@@ -16,7 +16,7 @@ mkdir -p "$OUT" && cd "$OUT"
 for attempt in 1 2 3 4 5; do
   LATEST=$(ls -t "$OUT"/run/lightning_logs/*/checkpoints/last.ckpt 2>/dev/null | head -1)
   echo "=== attempt $attempt (resume: ${LATEST:-none}) ==="
-  if python -m sylber2.train_content --config-name content_stage4 hydra.run.dir="$OUT/run" name="$OUT/run" model_ckpt=$SYLBER2_ROOT/outputs/stage3/run/lightning_logs/version_0/checkpoints/last.ckpt ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
+  if python -m sylber2.train_content --config-name content_stage4 hydra.run.dir="$OUT/run" name="$OUT/run" model_ckpt=$(ls -t $SYLBER2_ROOT/outputs/stage3/run/lightning_logs/*/checkpoints/last.ckpt | head -1) ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
     echo "=== training finished ==="
     break
   fi
