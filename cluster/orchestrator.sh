@@ -33,20 +33,43 @@ submit_phase() {  # $1 = phase
     cycle4) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4_auto)"
             export SYLBER2_WARM_CKPT="$(ckpt_of cycle3_auto)";;
   esac
-  # sanity: required predecessor must exist
+  # sanity: every SET predecessor variable must point to an existing file
+  # (note ${var-x}, not ${var:-x}: an empty string must FAIL, not fall back)
   for v in SYLBER2_PREV_CKPT SYLBER2_CONTENT_CKPT SYLBER2_WARM_CKPT; do
-    val="${!v:-unset}"
-    if [ "$val" != "unset" ] && [ ! -f "$val" ]; then
-      log "FATAL $phase: predecessor checkpoint missing ($v=$val)"; return 1
+    val="${!v-__UNSET__}"
+    [ "$val" = "__UNSET__" ] && continue
+    if [ -z "$val" ] || [ ! -f "$val" ]; then
+      log "FATAL $phase: predecessor checkpoint missing or empty ($v='"'"'$val'"'"')"
+      return 1
     fi
   done
   local script="cluster/${phase}.sbatch"
   [[ "$phase" == stage* ]] && script="cluster/${phase}.sbatch"
   cd "$REPO"
   out=$(sbatch --partition="$PARTITION" -J "sylber2-${phase}" "$script" 2>&1)
-  log "$phase submitted: $out (prev=${SYLBER2_PREV_CKPT:-} content=${SYLBER2_CONTENT_CKPT:-} warm=${SYLBER2_WARM_CKPT:-})"
-  echo "$out" | grep -q "Submitted" || return 1
+  log "$phase submitted: $out (prev=${SYLBER2_PREV_CKPT-} content=${SYLBER2_CONTENT_CKPT-} warm=${SYLBER2_WARM_CKPT-})"
+  jid=$(echo "$out" | grep -oE "[0-9]+$")
+  [ -n "$jid" ] || return 1
+  echo "$jid" >> "$STATE_DIR/${phase}.jobids"
   return 0
+}
+
+phase_finished() {  # only logs of jobs WE submitted count
+  local phase="$1" jid
+  [ -f "$STATE_DIR/${phase}.jobids" ] || return 1
+  while read -r jid; do
+    grep -q "=== training finished ===" "$REPO/sylber2-${phase}-${jid}.out" 2>/dev/null && return 0
+  done < "$STATE_DIR/${phase}.jobids"
+  return 1
+}
+
+phase_collapsed() {
+  local phase="$1" jid
+  [ -f "$STATE_DIR/${phase}.jobids" ] || return 1
+  while read -r jid; do
+    grep -q "collapse detected" "$REPO/sylber2-${phase}-${jid}.out" 2>/dev/null && return 0
+  done < "$STATE_DIR/${phase}.jobids"
+  return 1
 }
 
 # wait until no stage1 job is still running (do not chain off a mid-run ckpt)
@@ -66,12 +89,11 @@ for phase in "${PHASES[@]}"; do
     if squeue -u "$USER" -h -n "sylber2-${phase}" 2>/dev/null | grep -q .; then
       sleep 300; continue
     fi
-    # finished successfully? (retry loop echoes the marker)
-    latest_log=$(ls -t "$REPO"/sylber2-${phase}-*.out 2>/dev/null | head -1)
-    if [ -n "$latest_log" ] && grep -q "=== training finished ===" "$latest_log"; then
+    # finished successfully? (only jobs submitted by this orchestrator count)
+    if phase_finished "$phase"; then
       touch "$done_marker"; log "$phase COMPLETED"; break
     fi
-    if [ -n "$latest_log" ] && grep -q "collapse detected" "$latest_log"; then
+    if phase_collapsed "$phase"; then
       log "FATAL: collapse detected in $phase - stopping orchestration"; exit 2
     fi
     if [ "$resubmits" -ge "$MAX_RESUBMITS" ]; then
