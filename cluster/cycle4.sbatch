@@ -2,9 +2,10 @@
 #SBATCH --job-name=sylber2-cycle4
 #SBATCH --partition=p4,p2,p1
 #SBATCH --qos=gpuultimate
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=24
-#SBATCH --mem=256G
+#SBATCH --gres=gpu:4
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=512G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=%x-%j.out
 set +e
@@ -16,7 +17,7 @@ mkdir -p "$OUT" && cd "$OUT"
 for attempt in $(seq 1 20); do
   LATEST=$(ls -t "$OUT"/run/lightning_logs/*/checkpoints/last.ckpt 2>/dev/null | head -1)
   echo "=== attempt $attempt (resume: ${LATEST:-none}) ==="
-  if python -m sylber2.train_vocoder --config-name vocoder_cycle4 hydra.run.dir="$OUT/run" name="$OUT/run" model.content_ckpt=${SYLBER2_CONTENT_CKPT:-$(ls -t $SYLBER2_ROOT/outputs/stage4/run/lightning_logs/*/checkpoints/last.ckpt | head -1)} warm_start_ckpt=${SYLBER2_WARM_CKPT:-$(ls -t $SYLBER2_ROOT/outputs/cycle3/run/lightning_logs/*/checkpoints/last.ckpt | head -1)} ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
+  if srun python -m sylber2.train_vocoder --config-name vocoder_cycle4 hydra.run.dir="$OUT/run" name="$OUT/run" model.content_ckpt=${SYLBER2_CONTENT_CKPT:-$(ls -t $SYLBER2_ROOT/outputs/stage4/run/lightning_logs/*/checkpoints/last.ckpt | head -1)} warm_start_ckpt=${SYLBER2_WARM_CKPT:-$(ls -t $SYLBER2_ROOT/outputs/cycle3/run/lightning_logs/*/checkpoints/last.ckpt | head -1)} devices=4 strategy=ddp_find_unused_parameters_true ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
     echo "=== training finished ==="
     TRAINING_OK=1
     break
