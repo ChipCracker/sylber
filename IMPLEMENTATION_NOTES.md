@@ -62,3 +62,10 @@ documents every assumption made in this implementation.
     teacher's layer-8 features before L2 normalization in stage 1 (only);
     stages 2-4 use a frozen teacher and need no centering. `target_sim` is
     logged as a collapse early-warning metric (≈1.0 ⇒ collapsed).
+19. **Stages 2-4 operate on instance-normalized teacher features** (both the
+    greedy segmentation input and the segment-averaged targets, plus the
+    student prediction is L2-normalized in the loss): consistent with the
+    stage-1 target regime (#18), and necessary because the raw layer-8
+    features carry a dominant shared direction (pairwise cosine ≈ 0.87)
+    that would merge whole clips into one segment under the paper's merge
+    thresholds.

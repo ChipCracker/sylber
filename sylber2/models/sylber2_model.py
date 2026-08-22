@@ -82,7 +82,7 @@ class Sylber2(nn.Module):
         # sample/channel - globally uniform targets become impossible by
         # construction) and an EMA decay anneal so the teacher grows more
         # sluggish than the collapse spiral.
-        self.instance_norm_targets = instance_norm_targets and stage == 1
+        self.instance_norm_targets = instance_norm_targets
         self.ema_anneal_end = ema_anneal_end
         self.ema_anneal_steps = ema_anneal_steps
         self.register_buffer("target_center",
@@ -206,15 +206,27 @@ class Sylber2(nn.Module):
                 outputs['target_sim'] = ((sim.sum() - n) / (n * (n - 1))).detach()
             return outputs
 
-        # ---- stages 2-4: segment targets from the teacher
-        segments_batch = self._teacher_segments(trg_l8, trg_l9)
+        # ---- stages 2-4: segment targets from the teacher.
+        # Segmentation and targets operate on instance-normalized features:
+        # stage 1 trains the student against instance-normalized targets, and
+        # the raw features carry a dominant shared component that would merge
+        # everything under the paper thresholds.
+        if self.instance_norm_targets:
+            feats = trg_l8.float()
+            feats = (feats - feats.mean(dim=1, keepdim=True)) / (
+                feats.std(dim=1, keepdim=True) + 1e-5)
+            feats = feats.to(trg_l8.dtype)
+        else:
+            feats = trg_l8
+        segments_batch = self._teacher_segments(feats, trg_l9)
 
-        target = torch.zeros_like(trg_l8)
+        target = torch.zeros_like(feats)
         for b, segments in enumerate(segments_batch):
             for s, e in segments:
-                seg_mean = trg_l8[b, s:e].mean(0)
+                seg_mean = feats[b, s:e].mean(0)
                 target[b, s:e] = F.normalize(seg_mean, dim=-1)
-        outputs['distillation_loss'] = ((student_pred - target) ** 2).sum(-1).mean()
+        pred_n = F.normalize(student_pred, dim=-1)
+        outputs['distillation_loss'] = ((pred_n - target) ** 2).sum(-1).mean()
 
         if self.stage >= 3:
             bnd_targets = torch.from_numpy(np.stack([
