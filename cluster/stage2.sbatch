@@ -3,7 +3,7 @@
 #SBATCH --partition=p4,p2,p1
 #SBATCH --qos=gpuultimate
 #SBATCH --gres=gpu:4
-#SBATCH --ntasks=4
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=512G
 #SBATCH --time=2-00:00:00
