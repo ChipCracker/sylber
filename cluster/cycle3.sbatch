@@ -16,7 +16,7 @@ mkdir -p "$OUT" && cd "$OUT"
 for attempt in $(seq 1 20); do
   LATEST=$(ls -t "$OUT"/run/lightning_logs/*/checkpoints/last.ckpt 2>/dev/null | head -1)
   echo "=== attempt $attempt (resume: ${LATEST:-none}) ==="
-  if python -m sylber2.train_vocoder --config-name vocoder_cycle3 hydra.run.dir="$OUT/run" name="$OUT/run" model.content_ckpt=$(ls -t $SYLBER2_ROOT/outputs/stage4/run/lightning_logs/*/checkpoints/last.ckpt | head -1) warm_start_ckpt=$(ls -t $SYLBER2_ROOT/outputs/cycle2/run/lightning_logs/*/checkpoints/last.ckpt | head -1) ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
+  if python -m sylber2.train_vocoder --config-name vocoder_cycle3 hydra.run.dir="$OUT/run" name="$OUT/run" model.content_ckpt=${SYLBER2_CONTENT_CKPT:-$(ls -t $SYLBER2_ROOT/outputs/stage4/run/lightning_logs/*/checkpoints/last.ckpt | head -1)} warm_start_ckpt=${SYLBER2_WARM_CKPT:-$(ls -t $SYLBER2_ROOT/outputs/cycle2/run/lightning_logs/*/checkpoints/last.ckpt | head -1)} ${LATEST:+resume_ckpt="$LATEST"} "$@"; then
     echo "=== training finished ==="
     TRAINING_OK=1
     break

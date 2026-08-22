@@ -69,3 +69,7 @@ documents every assumption made in this implementation.
     features carry a dominant shared direction (pairwise cosine ≈ 0.87)
     that would merge whole clips into one segment under the paper's merge
     thresholds.
+20. **Vocoder cycles scaled to batch 48** (from the paper's batch 12): same
+    total sample count (steps /4: 2M->500k, 100k->25k), learning rate x2
+    (sqrt scaling; GAN-conservative), fits H200 memory. Motivated purely by
+    wall-clock (~4x); revert to batch 12 to match the paper exactly.

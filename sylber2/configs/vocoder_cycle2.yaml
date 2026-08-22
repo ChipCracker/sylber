@@ -16,9 +16,9 @@ model:
   freeze_acoustic_encoder: false
   mean_pool_acoustics_prob: 0.1
   shuffle_acoustics_prob: 0.0
-  lr: 1.0e-5
+  lr: 2.0e-5
   warmup_steps: 5000
-  total_steps: 2000000
+  total_steps: 500000
   betas: [0.8, 0.9]
   weight_decay: 0.01
   mel_coef: 45.0
@@ -28,21 +28,21 @@ model:
 data:
   train_sources: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/manifests/resynth
   source_weights: {fleurs_r: 7.0, default: 1.0}
-  batch_size: 12
-  num_workers: 12
+  batch_size: 48
+  num_workers: 16
   dummy_len: 144000
   crop_seconds: 3.0
   perturb_voice_prob: 0.2
   perturb_audio_prob: 0.2
   noise_dir: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/noise
   rir_dir: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/rir
-max_steps: 2000000
-checkpoint_every_steps: 10000
+max_steps: 500000
+checkpoint_every_steps: 2500
 warm_start_ckpt: ???
 resume_ckpt: null
 devices: 1
 precision: 32-true
 accelerator: gpu
 strategy: auto
-val_check_interval: 10000
+val_check_interval: 2500
 limit_val_batches: 10
