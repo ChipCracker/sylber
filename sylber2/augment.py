@@ -23,8 +23,11 @@ import librosa
 
 
 try:
+    import warnings
     import parselmouth
     from parselmouth.praat import call as praat_call
+    # unvoiced crops are normal and handled (median_f0=0 -> no pitch change)
+    warnings.filterwarnings("ignore", category=parselmouth.PraatWarning)
     HAS_PARSELMOUTH = True
 except ImportError:  # pragma: no cover
     HAS_PARSELMOUTH = False

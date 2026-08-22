@@ -13,10 +13,13 @@ import torch
 import hydra
 import lightning as pl
 
-if os.environ.get("SYLBER2_WATCHDOG"):
-    # periodically dump all thread stacks to stderr to diagnose hangs
-    faulthandler.dump_traceback_later(int(os.environ["SYLBER2_WATCHDOG"]),
-                                      repeat=True)
+def _arm_watchdog():
+    # periodically dump all thread stacks to stderr to diagnose hangs.
+    # Called from main() only: at module level this would also run inside
+    # every spawn dataloader worker (mp re-imports __main__) and flood the log.
+    if os.environ.get("SYLBER2_WATCHDOG"):
+        faulthandler.dump_traceback_later(int(os.environ["SYLBER2_WATCHDOG"]),
+                                          repeat=True)
 from omegaconf import OmegaConf
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
@@ -26,6 +29,7 @@ from sylber2.training.vocoder_trainer import VocoderTrainer
 
 @hydra.main(config_path="configs", config_name="vocoder_cycle1", version_base=None)
 def main(cfg):
+    _arm_watchdog()
     print(OmegaConf.to_yaml(cfg))
     pl.seed_everything(cfg.get("seed", 7))
     datamodule = ResynthesisDataModule(**cfg.data)
@@ -56,6 +60,7 @@ def main(cfg):
         callbacks=callbacks,
         default_root_dir=cfg.get("name", "sylber2_vocoder"),
         log_every_n_steps=50,
+        enable_progress_bar=False,
     )
     trainer.fit(model, datamodule, ckpt_path=cfg.get("resume_ckpt"))
 
