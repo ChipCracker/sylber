@@ -45,6 +45,9 @@ class Sylber2(nn.Module):
                  mask_prob=0.065,
                  mask_span=10,
                  var_coef=1.0,
+                 instance_norm_targets=True,
+                 ema_anneal_end=0.9999,
+                 ema_anneal_steps=30000,
                  load_pretrained=True,
                  encoder_kwargs=None,
                  **kwargs):
@@ -75,6 +78,13 @@ class Sylber2(nn.Module):
         self.mask_prob = mask_prob
         self.mask_span = mask_span
         self.var_coef = var_coef
+        # data2vec ingredients: instance-normalized targets (time-wise per
+        # sample/channel - globally uniform targets become impossible by
+        # construction) and an EMA decay anneal so the teacher grows more
+        # sluggish than the collapse spiral.
+        self.instance_norm_targets = instance_norm_targets and stage == 1
+        self.ema_anneal_end = ema_anneal_end
+        self.ema_anneal_steps = ema_anneal_steps
         self.register_buffer("target_center",
                              torch.zeros(self.student.enc_dim), persistent=True)
         self.register_buffer("center_initialized",
@@ -107,11 +117,15 @@ class Sylber2(nn.Module):
             if next(self.ema.model.parameters()).device != dev:
                 self.ema.model.to(dev)
 
-    def ema_step(self):
+    def ema_step(self, global_step=None):
         if self.stage == 1:
             if self.ema is None:
                 self.setup_teacher()
             else:
+                if global_step is not None and self.ema_anneal_steps > 0:
+                    frac = min(1.0, global_step / self.ema_anneal_steps)
+                    self.ema.decay = self.ema_decay + frac * (
+                        self.ema_anneal_end - self.ema_decay)
                 self._sync_teacher_device()
                 self.ema.step(self.student.backbone)
 
@@ -151,7 +165,11 @@ class Sylber2(nn.Module):
         B, L, D = student_pred.shape
 
         if self.stage == 1:
-            if self.center_targets:
+            if self.instance_norm_targets:
+                t = trg_l8.float()
+                t = (t - t.mean(dim=1, keepdim=True)) / (t.std(dim=1, keepdim=True) + 1e-5)
+                target = F.normalize(t, dim=-1).to(trg_l8.dtype)
+            elif self.center_targets:
                 with torch.no_grad():
                     batch_mean = trg_l8.float().mean(dim=(0, 1))
                     if self.training:
@@ -179,8 +197,8 @@ class Sylber2(nn.Module):
                 outputs['variance_loss'] = F.relu(1.0 - std).mean()
             with torch.no_grad():
                 # collapse early-warning: mean pairwise cosine similarity of
-                # CENTERED teacher features across random frames (1.0 == collapsed)
-                flat = (trg_l8.float() - self.target_center.float()).reshape(-1, trg_l8.shape[-1])
+                # the effective targets across random frames (1.0 == collapsed)
+                flat = target.float().reshape(-1, trg_l8.shape[-1])
                 idx = torch.randperm(flat.shape[0], device=flat.device)[:256]
                 sub = F.normalize(flat[idx], dim=-1)
                 sim = sub @ sub.T

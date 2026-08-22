@@ -33,7 +33,7 @@ class ContentTrainer(LightningModule):
 
     def training_step(self, batch, batch_idx):
         if self.net.stage == 1:
-            self.net.ema_step()
+            self.net.ema_step(self.global_step)
         outputs = self.net(**batch)
         loss = 0.0
         for name, coef in self.loss_coefs.items():
