@@ -52,7 +52,7 @@ class ContentDataModule(LightningDataModule):
         return DataLoader(ds, batch_size=self.batch_size, num_workers=self.num_workers,
                           collate_fn=ContentDataset.collate, drop_last=True,
                           pin_memory=True, persistent_workers=False,
-                          timeout=600 if self.num_workers else 0,
+                          timeout=240 if self.num_workers else 0,
                           multiprocessing_context="spawn" if self.num_workers else None)
 
     def val_dataloader(self):
@@ -84,7 +84,7 @@ class ResynthesisDataModule(LightningDataModule):
         return DataLoader(ds, batch_size=self.batch_size, num_workers=self.num_workers,
                           collate_fn=ResynthesisDataset.collate, drop_last=True,
                           pin_memory=True, persistent_workers=False,
-                          timeout=600 if self.num_workers else 0,
+                          timeout=240 if self.num_workers else 0,
                           multiprocessing_context="spawn" if self.num_workers else None)
 
     def val_dataloader(self):

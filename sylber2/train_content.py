@@ -7,6 +7,8 @@ Usage:
 """
 import os
 import faulthandler
+from datetime import timedelta
+
 import torch
 import hydra
 import lightning as pl
@@ -35,6 +37,18 @@ def load_student_weights(model, ckpt_path):
           f"(missing={len(missing)}, unexpected={len(unexpected)})")
 
 
+def _make_strategy(name):
+    """ddp strategies get a 60-min collective timeout: a rank stalled in the
+    dataloader must hit the (shorter) DataLoader timeout and retry cleanly,
+    not be killed by the NCCL watchdog."""
+    if isinstance(name, str) and name.startswith("ddp"):
+        from lightning.pytorch.strategies import DDPStrategy
+        return DDPStrategy(
+            find_unused_parameters="find_unused_parameters" in name,
+            timeout=timedelta(minutes=60))
+    return name
+
+
 @hydra.main(config_path="configs", config_name="content_stage1", version_base=None)
 def main(cfg):
     _arm_watchdog()
@@ -53,7 +67,7 @@ def main(cfg):
     trainer = pl.Trainer(
         devices=cfg.get("devices", 1),
         accelerator=cfg.get("accelerator", "gpu"),
-        strategy=cfg.get("strategy", "auto"),
+        strategy=_make_strategy(cfg.get("strategy", "auto")),
         precision=cfg.get("precision", "bf16-mixed"),
         max_steps=cfg.max_steps,
         num_sanity_val_steps=0,
