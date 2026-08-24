@@ -30,14 +30,14 @@ from sylber2.training.vocoder_trainer import VocoderTrainer
 
 
 def _make_strategy(name):
-    """ddp strategies get a 60-min collective timeout: a rank stalled in the
-    dataloader must hit the (shorter) DataLoader timeout and retry cleanly,
-    not be killed by the NCCL watchdog."""
+    """ddp strategies get a 15-min collective timeout: NFS hard-mount stalls
+    on single ranks are unrecoverable from Python, so failing fast and
+    resuming from the rolling checkpoint costs ~15 min instead of 60+."""
     if isinstance(name, str) and name.startswith("ddp"):
         from lightning.pytorch.strategies import DDPStrategy
         return DDPStrategy(
             find_unused_parameters="find_unused_parameters" in name,
-            timeout=timedelta(minutes=60))
+            timeout=timedelta(minutes=15))
     return name
 
 
