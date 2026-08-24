@@ -142,6 +142,8 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--sweep", action="store_true",
                     help="sweep peak height/prominence operating points")
+    ap.add_argument("--simmerge", action="store_true",
+                    help="sweep similarity-based neighbor merging thresholds")
     args = ap.parse_args()
 
     from sylber2.inference import Segmenter2
@@ -149,6 +151,8 @@ def main():
 
     if args.sweep:
         return sweep(seg, args)
+    if args.simmerge:
+        return simmerge_sweep(seg, args)
 
     tgs = sorted(glob.glob(f"{args.align_dir}/**/*.TextGrid", recursive=True))
     if args.limit:
@@ -190,6 +194,63 @@ def main():
         rv = 1 - (abs(np.sqrt((1 - re_) ** 2 + os_ ** 2)) + abs((-os_ + re_ - 1) / np.sqrt(2))) / 2
         label = "raw" if f == 0 else f">={int(f*1000)}ms"
         print(f"{label:>8} {pr*100:6.1f} {re_*100:6.1f} {f1*100:6.1f} {rv*100:6.1f}")
+
+
+def simmerge_sweep(seg, args):
+    """Post-hoc consolidation: iteratively merge the most-similar adjacent
+    segment pair (duration-weighted mean features) while cos-sim > tau."""
+    tgs = sorted(glob.glob(f"{args.align_dir}/**/*.TextGrid", recursive=True))
+    if args.limit:
+        tgs = tgs[:args.limit]
+    taus = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
+    agg = {t: np.zeros(3) for t in taus}
+    n = 0
+    for tg in tgs:
+        utt = Path(tg).stem
+        spk, chap = utt.split("-")[0], utt.split("-")[1]
+        wav = Path(args.audio_dir) / spk / chap / f"{utt}.flac"
+        if not wav.exists():
+            continue
+        ref = [b for b in syllable_boundaries(parse_textgrid_phones(tg)) if b > 0.01]
+        if len(ref) < 2:
+            continue
+        out = seg(wav_file=str(wav))
+        segs0 = [list(s) for s in out["segments"]]
+        f0 = out["segment_features"].astype(np.float64)
+        if len(segs0) < 3:
+            continue
+        for tau in taus:  # taus descending: keep merging progressively
+            segs = [list(s) for s in segs0]
+            feats = [f for f in f0]
+            while len(segs) > 1:
+                sims = []
+                for i in range(len(segs) - 1):
+                    a, b = feats[i], feats[i + 1]
+                    sims.append(float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9)))
+                j = int(np.argmax(sims))
+                if sims[j] <= tau:
+                    break
+                da = segs[j][1] - segs[j][0]
+                db = segs[j + 1][1] - segs[j + 1][0]
+                feats[j] = (feats[j] * da + feats[j + 1] * db) / (da + db)
+                segs[j] = [segs[j][0], segs[j + 1][1]]
+                del segs[j + 1]
+                del feats[j + 1]
+            pred = [s for s, _ in segs[1:]]
+            _, _, _, _, tp, npred, nref = prf_r(pred, ref)
+            agg[tau] += [tp, npred, nref]
+        n += 1
+        if n % 100 == 0:
+            print(f"  {n} utts...", flush=True)
+    print(f"\n=== Similarity-merge sweep ({n} utts, 50 ms tol) ===")
+    print(f"{'tau':>5} {'Pr':>6} {'Re':>6} {'F1':>6} {'R':>6} {'Grenzen/Ref':>12}")
+    for tau in taus:
+        tp, npred, nref = agg[tau]
+        pr, re_ = tp / max(npred, 1), tp / max(nref, 1)
+        f1 = 2 * pr * re_ / max(pr + re_, 1e-9)
+        os_ = re_ / max(pr, 1e-9) - 1
+        rv = 1 - (abs(np.sqrt((1 - re_) ** 2 + os_ ** 2)) + abs((-os_ + re_ - 1) / np.sqrt(2))) / 2
+        print(f"{tau:5.2f} {pr*100:6.1f} {re_*100:6.1f} {f1*100:6.1f} {rv*100:6.1f} {npred/nref:12.2f}")
 
 
 def sweep(seg, args):
