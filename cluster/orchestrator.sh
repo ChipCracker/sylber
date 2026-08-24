@@ -5,11 +5,11 @@
 #   nohup bash cluster/orchestrator.sh > $SYLBER2_ROOT/logs/orchestrator.log 2>&1 &
 set -u
 source "$(dirname "$0")/common.sh"
+SUFFIX="${SYLBER2_SUFFIX:-_auto}"
 STATE_DIR="$SYLBER2_ROOT/outputs/orchestrator${SUFFIX}"
 mkdir -p "$STATE_DIR"
 MAX_RESUBMITS=15
 PARTITION="${SYLBER2_PARTITION:-p4}"
-SUFFIX="${SYLBER2_SUFFIX:-_auto}"
 read -r -a PHASES <<< "${SYLBER2_PHASES:-stage2 stage3 stage4 cycle1 cycle2 cycle3 cycle4}"
 log() { echo "$(date "+%F %T") $*"; }
 
