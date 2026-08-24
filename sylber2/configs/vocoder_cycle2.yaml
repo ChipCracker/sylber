@@ -37,7 +37,7 @@ data:
   noise_dir: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/noise
   rir_dir: ${oc.env:SYLBER2_DATA,/nfs1/scratch/students/witzlch88229/sylber2/data}/rir
 max_steps: 500000
-checkpoint_every_steps: 2500
+checkpoint_every_steps: 10000
 warm_start_ckpt: ???
 resume_ckpt: null
 devices: 1

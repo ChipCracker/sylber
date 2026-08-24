@@ -58,8 +58,10 @@ def main(cfg):
 
     callbacks = [
         LearningRateMonitor(logging_interval="step"),
+        # cycles: keep only the rolling last.ckpt - full snapshots every
+        # 2.5k steps piled up ~500 GB and stalled ranks on NFS writes
         ModelCheckpoint(every_n_train_steps=cfg.get("checkpoint_every_steps", 50000),
-                        save_last=True, save_top_k=-1),
+                        save_last=True, save_top_k=0),
     ]
     trainer = pl.Trainer(
         devices=cfg.get("devices", 1),
