@@ -140,10 +140,15 @@ def main():
     ap.add_argument("audio_dir")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--sweep", action="store_true",
+                    help="sweep peak height/prominence operating points")
     args = ap.parse_args()
 
     from sylber2.inference import Segmenter2
     seg = Segmenter2(args.ckpt, device=args.device)
+
+    if args.sweep:
+        return sweep(seg, args)
 
     tgs = sorted(glob.glob(f"{args.align_dir}/**/*.TextGrid", recursive=True))
     if args.limit:
@@ -185,6 +190,54 @@ def main():
         rv = 1 - (abs(np.sqrt((1 - re_) ** 2 + os_ ** 2)) + abs((-os_ + re_ - 1) / np.sqrt(2))) / 2
         label = "raw" if f == 0 else f">={int(f*1000)}ms"
         print(f"{label:>8} {pr*100:6.1f} {re_*100:6.1f} {f1*100:6.1f} {rv*100:6.1f}")
+
+
+def sweep(seg, args):
+    """Probs once per utterance, peaks for many (height, prominence) points."""
+    import torch
+    import soundfile as sf
+    from sylber2.segmentation import detect_boundaries, boundaries_to_segments
+
+    tgs = sorted(glob.glob(f"{args.align_dir}/**/*.TextGrid", recursive=True))
+    if args.limit:
+        tgs = tgs[:args.limit]
+    points = [(h, p) for h in (0.2, 0.3, 0.4, 0.5) for p in (0.05, 0.1, 0.2, 0.3)]
+    agg = {pt: np.zeros(3) for pt in points}
+    n = 0
+    for tg in tgs:
+        utt = Path(tg).stem
+        spk, chap = utt.split("-")[0], utt.split("-")[1]
+        wav = Path(args.audio_dir) / spk / chap / f"{utt}.flac"
+        if not wav.exists():
+            continue
+        ref = [b for b in syllable_boundaries(parse_textgrid_phones(tg)) if b > 0.01]
+        if len(ref) < 2:
+            continue
+        y, sr = sf.read(wav, dtype="float32")
+        y = (y - y.mean()) / (y.std() + 1e-9)
+        with torch.no_grad():
+            frames, _ = seg.model.student.student_frames(
+                torch.from_numpy(y[None]).to(seg.device))
+            probs = torch.sigmoid(seg.model.student.boundary_logits(frames))[0]
+            probs = probs.float().cpu().numpy()
+        L = len(probs)
+        for h, p in points:
+            b = detect_boundaries(probs, min_height=h, prominence=p, prob_override=0.95)
+            segs = boundaries_to_segments(b, L)
+            pred = [s / 50.0 for s, _ in segs[1:]]
+            _, _, _, _, tp, npred, nref = prf_r(pred, ref)
+            agg[(h, p)] += [tp, npred, nref]
+        n += 1
+        if n % 100 == 0:
+            print(f"  {n} utts...", flush=True)
+    print(f"\n=== Peak-parameter sweep ({n} utts, 50 ms tol) ===")
+    print(f"{'height':>7} {'promin':>7} {'Pr':>6} {'Re':>6} {'F1':>6} {'R':>6} {'seg/s-Faktor':>13}")
+    for (h, p), (tp, npred, nref) in sorted(agg.items()):
+        pr, re_ = tp / max(npred, 1), tp / max(nref, 1)
+        f1 = 2 * pr * re_ / max(pr + re_, 1e-9)
+        os_ = re_ / max(pr, 1e-9) - 1
+        rv = 1 - (abs(np.sqrt((1 - re_) ** 2 + os_ ** 2)) + abs((-os_ + re_ - 1) / np.sqrt(2))) / 2
+        print(f"{h:7.2f} {p:7.2f} {pr*100:6.1f} {re_*100:6.1f} {f1*100:6.1f} {rv*100:6.1f} {npred/nref:13.2f}")
 
 
 if __name__ == "__main__":
