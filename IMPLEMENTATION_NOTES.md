@@ -73,3 +73,9 @@ documents every assumption made in this implementation.
     total sample count (steps /4: 2M->500k, 100k->25k), learning rate x2
     (sqrt scaling; GAN-conservative), fits H200 memory. Motivated purely by
     wall-clock (~4x); revert to batch 12 to match the paper exactly.
+21. **Content v2 (recalibrated thresholds)**: on instance-normalized features
+    the paper's merge thresholds [0.5-0.9] yield 12-15 seg/s (measured);
+    tau=0.20 reproduces the paper token rate (~5/s). Content v2 retrains
+    stages 2-4 from the same stage-1 checkpoint with stage2 [0.20,0.30]
+    (refine 0.20) and stage3/4 [0.35,0.50] (refine 0.35). The original
+    (fine-grained, ~10 Hz) line is kept and continues through the cycles.

@@ -5,12 +5,12 @@
 #   nohup bash cluster/orchestrator.sh > $SYLBER2_ROOT/logs/orchestrator.log 2>&1 &
 set -u
 source "$(dirname "$0")/common.sh"
-STATE_DIR="$SYLBER2_ROOT/outputs/orchestrator"
+STATE_DIR="$SYLBER2_ROOT/outputs/orchestrator${SUFFIX}"
 mkdir -p "$STATE_DIR"
 MAX_RESUBMITS=15
 PARTITION="${SYLBER2_PARTITION:-p4}"
-
-PHASES=(stage2 stage3 stage4 cycle1 cycle2 cycle3 cycle4)
+SUFFIX="${SYLBER2_SUFFIX:-_auto}"
+read -r -a PHASES <<< "${SYLBER2_PHASES:-stage2 stage3 stage4 cycle1 cycle2 cycle3 cycle4}"
 log() { echo "$(date "+%F %T") $*"; }
 
 ckpt_of() {  # newest last.ckpt of a run name
@@ -19,19 +19,19 @@ ckpt_of() {  # newest last.ckpt of a run name
 
 submit_phase() {  # $1 = phase
   local phase="$1" prev="" args=""
-  export SYLBER2_RUN_NAME="${phase}_auto"
+  export SYLBER2_RUN_NAME="${phase}${SUFFIX}"
   unset SYLBER2_PREV_CKPT SYLBER2_CONTENT_CKPT SYLBER2_WARM_CKPT
   case "$phase" in
     stage2) export SYLBER2_PREV_CKPT="$(ckpt_of stage1_v5)";;
-    stage3) export SYLBER2_PREV_CKPT="$(ckpt_of stage2_auto)";;
-    stage4) export SYLBER2_PREV_CKPT="$(ckpt_of stage3_auto)";;
-    cycle1) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4_auto)";;
-    cycle2) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4_auto)"
-            export SYLBER2_WARM_CKPT="$(ckpt_of cycle1_auto)";;
-    cycle3) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4_auto)"
-            export SYLBER2_WARM_CKPT="$(ckpt_of cycle2_auto)";;
-    cycle4) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4_auto)"
-            export SYLBER2_WARM_CKPT="$(ckpt_of cycle3_auto)";;
+    stage3) export SYLBER2_PREV_CKPT="$(ckpt_of stage2${SUFFIX})";;
+    stage4) export SYLBER2_PREV_CKPT="$(ckpt_of stage3${SUFFIX})";;
+    cycle1) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4${SUFFIX})";;
+    cycle2) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4${SUFFIX})"
+            export SYLBER2_WARM_CKPT="$(ckpt_of cycle1${SUFFIX})";;
+    cycle3) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4${SUFFIX})"
+            export SYLBER2_WARM_CKPT="$(ckpt_of cycle2${SUFFIX})";;
+    cycle4) export SYLBER2_CONTENT_CKPT="$(ckpt_of stage4${SUFFIX})"
+            export SYLBER2_WARM_CKPT="$(ckpt_of cycle3${SUFFIX})";;
   esac
   # sanity: every SET predecessor variable must point to an existing file
   # (note ${var-x}, not ${var:-x}: an empty string must FAIL, not fall back)
@@ -46,7 +46,9 @@ submit_phase() {  # $1 = phase
   local script="cluster/${phase}.sbatch"
   [[ "$phase" == stage* ]] && script="cluster/${phase}.sbatch"
   cd "$REPO"
-  out=$(sbatch --partition="$PARTITION" -J "sylber2-${phase}" "$script" 2>&1)
+  local exv="SYLBER2_EXTRA_ARGS_$(echo "$phase" | tr a-z A-Z)"
+  local extra="${!exv:-${SYLBER2_EXTRA_ARGS:-}}"
+  out=$(sbatch --partition="$PARTITION" ${SYLBER2_SBATCH_ARGS:-} -J "sylber2-${phase}${SUFFIX}" "$script" $extra 2>&1)
   log "$phase submitted: $out (prev=${SYLBER2_PREV_CKPT-} content=${SYLBER2_CONTENT_CKPT-} warm=${SYLBER2_WARM_CKPT-})"
   jid=$(echo "$out" | grep -oE "[0-9]+$")
   [ -n "$jid" ] || return 1
@@ -58,7 +60,7 @@ phase_finished() {  # only logs of jobs WE submitted count
   local phase="$1" jid
   [ -f "$STATE_DIR/${phase}.jobids" ] || return 1
   while read -r jid; do
-    grep -q "=== training finished ===" "$REPO/sylber2-${phase}-${jid}.out" 2>/dev/null && return 0
+    grep -q "=== training finished ===" "$REPO/sylber2-${phase}${SUFFIX}-${jid}.out" 2>/dev/null && return 0
   done < "$STATE_DIR/${phase}.jobids"
   return 1
 }
@@ -67,7 +69,7 @@ phase_collapsed() {
   local phase="$1" jid
   [ -f "$STATE_DIR/${phase}.jobids" ] || return 1
   while read -r jid; do
-    grep -q "collapse detected" "$REPO/sylber2-${phase}-${jid}.out" 2>/dev/null && return 0
+    grep -q "collapse detected" "$REPO/sylber2-${phase}${SUFFIX}-${jid}.out" 2>/dev/null && return 0
   done < "$STATE_DIR/${phase}.jobids"
   return 1
 }
@@ -86,7 +88,7 @@ for phase in "${PHASES[@]}"; do
   resubmits=0
   while true; do
     # is a job for this phase running/pending?
-    if squeue -u "$USER" -h -n "sylber2-${phase}" 2>/dev/null | grep -q .; then
+    if squeue -u "$USER" -h -n "sylber2-${phase}${SUFFIX}" 2>/dev/null | grep -q .; then
       sleep 300; continue
     fi
     # finished successfully? (only jobs submitted by this orchestrator count)
